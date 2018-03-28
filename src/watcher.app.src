@@ -1,0 +1,11 @@
+{application, watcher,
+	[
+		{description, "Watcher"},
+		{vsn, "0.1"},
+		{applications,[kernel,stdlib]},
+		{modules,[watcher]},
+		{registered,[watcher]},
+	 	{mod,{watcher,[]}},
+		{env, []}
+	]
+}.
