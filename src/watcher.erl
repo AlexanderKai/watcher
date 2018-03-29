@@ -3,7 +3,7 @@
 
 -export([start_link/1, start/0]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
-         code_change/3, raw_rule/1, rule/1, rule/2, clear/0, on/0, off/0, find_source_in_line/3, format/1]).
+         code_change/3, raw_rule/1, rule/1, rule/2, clear/0, on/0, off/0, find_source_in_line/3, format/1, options/2]).
 
 
 -record(state, {rules}).
@@ -23,6 +23,9 @@ raw_rule(Rule) ->
 	gen_server:call(?MODULE, {rule, Rule}).
 
 %watcher:rule(my_module).
+options(Module, Options) ->
+	gen_server:call(?MODULE, {options, {Module, Options}}).
+
 rule(Module) ->
 	Send = case is_list(module) of
 		false ->
@@ -54,9 +57,9 @@ find_source_in_line([H|T], _, _) ->
 format([MF, Line, Variable, Value]) ->
 	case is_list(Value) of
 		true ->
-			Test = binary:list_to_bin(Value),
+			Test = list_to_binary(io_lib:print(Value)),
 			Length = length(Value),
-			case byte_size(Test) > 50 orelse Length > 28 of
+			case byte_size(Test) > 50 orelse Length > 25  of
 				true ->
 					io:format("~30.w|~5.w|~20.s|~60.p~n", [MF, Line, Variable, Value]);
 				_ ->
@@ -81,20 +84,47 @@ compile_file([F1, F2], Type) ->
 				[F1, F2]
 		end,
 	ErlBackup = Erl ++ ".bak",
+	BeamBackup = Beam ++ ".bak",
 	{ok, ErlBinary} = file:read_file(Erl),
 	file:copy(Erl, ErlBackup),
+	file:copy(Beam, BeamBackup),
 	case Type of
 		original ->
 			[];
 		trace ->
-			file:write_file(Erl, [<<"-compile({parse_transform, watcher_pt}).\n">>, ErlBinary])
+			[]
+			%file:write_file(Erl, [<<"-compile({parse_transform, watcher_pt}).\n">>, ErlBinary])
 	end,
 	Tokens = string:tokens(Beam, "/"),
 	ShortName = hd(lists:reverse(Tokens)),
+	[ModuleName, _]  = string:tokens(ShortName, "."),
 	Outdir = lists:flatten(string:replace(Beam, ShortName, "", trailing)),
-	io:format("Compile Ebin dir ~p~n", [Outdir]),
-	compile:file(Erl, [verbose, {outdir,Outdir}]),
+	%io:format("Compile Ebin dir ~p~n", [Outdir]),
+
+	io:format("ShortName ~p~n", [list_to_atom(ModuleName)]),
+	[{_,ModuleOptions}] = ets:lookup(watcher_module_options, list_to_atom(ModuleName)),
+	Res = compile:file(Erl, [verbose, {outdir,Outdir},  
+							 			%{parse_transform, lager_transform},
+							            %{parse_transform, cut},
+							            %{parse_transform, boss_db_pmod_pt},
+							            %{parse_transform, boss_db_pt},
+							            %{parse_transform, do},
+							            %{parse_transform, import_as},
+							 			
+										{parse_transform, watcher_pt} 
+							] ++ ModuleOptions),
+	case Res of
+		error ->
+			file:copy(BeamBackup, Beam);
+		{error,_,_} ->
+			file:copy(BeamBackup, Beam);
+		_ ->
+			[]
+	end,
+
+	io:format("compile res ~n~p~n~p~n", [ShortName, Res]),
 	file:write_file(Erl, ErlBinary),
+	file:delete(BeamBackup),
 	file:delete(ErlBackup).
 
 clear() ->
@@ -102,13 +132,16 @@ clear() ->
 
 %parse_rule(Rule) ->
 
+handle_call({options, {Module, Options}}, _From, #state{}=State) ->
+	ets:insert(watcher_module_options, {Module, Options}),
+	{reply, ok, State};
+
 handle_call({rule, {Module, FunctionsVariables}}, _From, #state{}=State) ->
 	Insert = 
 	[
 	 	case is_tuple(Rule) of
 			true ->
 				RuleL = [Rule],
-				io:format("Rule ~p~n", [Rule]),
 				[
 					[
 						{{Module, Func}, V}
@@ -130,7 +163,6 @@ handle_call({rule, {Module, FunctionsVariables}}, _From, #state{}=State) ->
 	||
 		Rule <- FunctionsVariables
 	],
-	io:format("Rules flatten ~p~n", [lists:flatten(Insert)]),
 	ets:insert(watcher, lists:flatten(Insert)),
 	{reply, ok, State};	
 
@@ -168,7 +200,7 @@ handle_call({compile, Type}, _From, #state{}=State) ->
 		File <- Files
 	],
 
-	io:format("Compiling and purging modules ~n"),
+	io:format("Loading and purging modules ~n"),
 	Purge = [
 	 	begin
 			%case erlang:check_old_code(list_to_atom(Module)) of
@@ -197,6 +229,7 @@ handle_call({compile, Type}, _From, #state{}=State) ->
 
 handle_call(clear, _From, #state{}=State) ->
 	ets:delete_all_objects(watcher),
+	ets:delete_all_objects(watcher_module_options),
 	{reply, ok, State}.	
 
 handle_cast(_Msg, State) ->
@@ -204,6 +237,7 @@ handle_cast(_Msg, State) ->
 
 handle_info(init, #state{rules=Rules}=State) ->
 	ets:new(watcher, [named_table, {read_concurrency, true}, bag, public]),
+	ets:new(watcher_module_options, [named_table, {read_concurrency, true}, set, public]),
     {noreply, State};
 
 handle_info({check, From, Name, MFA}, #state{rules=Rules}=State) ->

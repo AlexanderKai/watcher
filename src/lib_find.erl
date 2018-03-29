@@ -1,7 +1,6 @@
 -module(lib_find).
 -export([files/3, files/5]).
 -import(lists, [reverse/1]).
-%-compile({parse_transform, tv}).
 -include_lib("kernel/include/file.hrl" ).
 
 files(Dir, Re, Flag) ->

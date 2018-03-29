@@ -6,17 +6,23 @@ get_filter(Module) ->
 	case All of
 		[] ->
 			Res = ets:lookup(watcher, Module),
-			%io:format("get_filter/1 Res ~p~n",[Res]),
-			lists:max([
-				case R of
-					{Mod, Func} ->
-						false;
-					_ ->
-						Module == R
-				end
-			||
-			R <- Res
-			]);
+			case Res of
+				[] ->
+					false;
+				_ ->
+					%io:format("get_filter/1 Res ~p~n",[Res]),
+					lists:max([
+						case R of
+							{Mod, Func} ->
+								false;
+							_ ->
+								Module == R
+						end
+
+					||
+						R <- Res
+					])
+			end;
 		_ ->
 			true
 	end.
@@ -45,10 +51,22 @@ parse_transform(AST, _Options) ->
 	%io:format("~p~n", [ets:lookup(watcher, test)]),
 	Module = find_module(AST),
 	Perm = get_filter(Module),
-	io:format("Transforming ~p~n", [Module]),
+
+	%io:format("Perm module ~p~n", [Perm]),
+	%io:format("Transforming ~p~n", [Module]),
 	Res = [parse({Perm, Module}, T) || T <- AST],
 	%io:format("============================Original========================~n~p~n", [AST]),
 	%io:format("============================Modified========================~n~p~n", [Res]),
+	%io:format("~60.w~60.w", [AST, Res]),
+	%file:write_file("orig", io_lib:format("~p.~n", [AST])),
+	%file:write_file("modf", io_lib:format("~p.~n", [Res])),
+	try
+	Check = erl_lint:module(Res)
+	%io:format("============================Check========================~n~p~n", [Check])
+	catch
+		E1:E2 -> io:format("E1~p~nE2~p~n", [E1, E2]),
+				 io:format("Stack ~p~n",[erlang:get_stacktrace()])
+	end,
 	Res. 
 
 parse({ModulePerm, Module}, {function, Line, Function, Arity, Clauses}) ->
@@ -65,7 +83,12 @@ parse(_, T) ->
 	T.
 
 find_module([{attribute, _, module, Module}|_T]) ->
-	Module;
+	case is_tuple(Module) of
+		true ->
+			element(1, Module);
+		_ ->
+			Module
+	end;
 
 find_module([_H|T]) ->
 	find_module(T).
@@ -76,7 +99,7 @@ parse_func_clauses({P,M,F}, {clause,Line,Arguments,GuardSeq,Expressions}) ->
 	FunctionMatching = lists:flatten(
 		lists:map(
 		fun(V) ->
-			%io:format("parse func_expressions V ~p~n~p~n~p~n~p~n", [P, M, F, V]),
+	%		io:format("parse func_expressions V ~p~n~p~n~p~n~p~n", [P, M, F, V]),
 			parse_func_expressions({P,M,F}, V)
 		end,
 	Arguments)),
@@ -106,7 +129,8 @@ find_var({var, _Line, Var}) ->
 	[Var];
 
 find_var({cons, _Line, Head, Tail}) ->
-	[find_var(Head) | find_var(Tail)];
+	%[find_var(Head) | find_var(Tail)];
+	find_var(Head) ++ find_var(Tail);
 
 %find_var({record, _Line, Name, _Fields}) ->
 %	Name;
@@ -127,7 +151,7 @@ parse_func_expressions({Perm, Module, Function}, {match, Line, Var, Expression})
 	Vars = lists:flatten(find_var(Var)),
 	%io:format("Exps ~p~n", [Exp]),
 	%io:format("Vars ~p~n", [Vars]),
-	Tracing =
+	Tracing = {block, Line,
 			[
 				io_format({Module, Function}, V, Line)
 			||
@@ -137,13 +161,13 @@ parse_func_expressions({Perm, Module, Function}, {match, Line, Var, Expression})
 				io_format({Module, Function}, V, Line)
 			||
 				V <- Exp, Perm orelse get_filter(Module, Function, V) == true
-			],
+			]},
 	%io:format("Tracing ~p~n", [Tracing]),
-	case Exp of
-		[] -> 
+	case Tracing of
+		{block, Line, []} -> 
 		 	[];
-		_ ->
-			{block, Line, Tracing }
+		V ->
+			V
 	end;
 
 parse_func_expressions({Perm, Module, Function}, {var, Line, '_'}) ->
@@ -152,11 +176,15 @@ parse_func_expressions({Perm, Module, Function}, {var, Line, '_'}) ->
 parse_func_expressions({Perm, Module, Function}, {var, Line, Var}) ->
 	%Vars = lists:flatten(find_var(Var)),
 	%io:format("Tracing ~p~n", [Tracing]),
-	case Perm orelse get_filter(Module, Function, Var) == true of
+	Res = case Perm orelse get_filter(Module, Function, Var) == true of
 		true ->
 			{block, Line, [io_format({Module, Function}, Var, Line)]};
 		false ->
 			[]
+	end,
+	case Res of
+		{block, Line, []} -> [];
+		_ -> Res
 	end;
 
 parse_func_expressions(_, V) ->
@@ -194,14 +222,15 @@ parse_expressions({Perm, Module, Function}, Exp) ->
 
 parse_expressions({Perm, Module, Function}, {match, Line, Var, Expression}, Order) ->
 	Vars = lists:flatten(find_var(Var)),
-	Tracing = [
+	Tracing = {block, Line,[
 		io_format({Module, Function}, V, Line)
 	||
 		V <- Vars, Perm orelse get_filter(Module, Function, V) == true
-	],
+	]},
+	%io:format("Vars ~p~n", [Vars]),
 	%io:format("Tracing ~p~n", [Tracing]),
-	case Vars of
-		[] -> 
+	case Tracing of
+		{block, Line, []} -> 
 		 	{match, Line, Var, parse_expressions({Perm, Module, Function}, Expression)};
 		_ ->
 			case Order of
@@ -209,8 +238,10 @@ parse_expressions({Perm, Module, Function}, {match, Line, Var, Expression}, Orde
 					{block, Line, 
 					 	[
 						 	{match, Line, Var, parse_expressions({Perm, Module, Function}, Expression, Order)}
-							|
+							,
 							Tracing
+							,
+							Var
 						] 
 					};
 				'not_trace' ->
@@ -237,6 +268,7 @@ get_from_arguments(Args) ->
 	[].
 
 io_format({Module, Function}, Var, Line) ->
+	%{block, Line, []}.
 	gen_remote_call(watcher,format,
 		[
 			%{string,Line,"~30.w|~5.w|~20.s|~40.p|~n"}, 
