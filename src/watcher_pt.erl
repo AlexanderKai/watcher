@@ -138,11 +138,18 @@ var_watcher({string, Line, String}) ->
 var_watcher({atom, Line, Atom}) ->
 	{atom, Line, Atom};
 
-var_watcher({var, Line, '_'}) ->
-	{string, Line, "_"};
-
 var_watcher({var, Line, Var}) ->
-	{var, Line, list_to_atom(atom_to_list(Var) ++ "_WTCH")};
+	ListAtom = atom_to_list(Var),
+	CheckUnbound = hd(ListAtom),
+	case CheckUnbound of
+		"_" ->
+			{string, Line, ListAtom};
+		_ ->
+			{var, Line, list_to_atom(ListAtom ++ "_WTCH")}
+	end;
+
+%var_watcher({var, Line, Var}) ->
+%	{var, Line, list_to_atom(atom_to_list(Var) ++ "_WTCH")};
 
 var_watcher({cons, Line, Head, Tail}) ->
 	{cons, Line, var_watcher(Head), var_watcher(Tail)};
