@@ -59,8 +59,8 @@ parse_transform(AST, _Options) ->
 	%io:format("Perm module ~p~n", [Perm]),
 	%io:format("Transforming ~p~n", [Module]),
 	Res = [parse({Perm, Module}, T) || T <- AST],
-	io:format("============================Original========================~n~p~n", [AST]),
-	io:format("============================Modified========================~n~p~n", [Res]),
+	%io:format("============================Original========================~n~p~n", [AST]),
+	%io:format("============================Modified========================~n~p~n", [Res]),
 	%io:format("~60.w~60.w", [AST, Res]),
 	file:write_file("orig", io_lib:format("~p.~n", [AST])),
 	file:write_file("modf", io_lib:format("~p.~n", [Res])),
@@ -270,7 +270,8 @@ parse_expressions({Perm, Module, Function}, {match, Line, Var, Expression}, Orde
 			io:format("E1 ~p~nE2 ~p~n", [E1, E2]),
 		A = 1/0
 	end,
-	ListVarsWatcher = lists:flatten(find_var(Var_Watcher)),
+	%ListVarsWatcher = lists:flatten(find_var(Var_Watcher)),
+	ListVarsWatcher = lists:flatten(Var_Watcher),
 
 	Tracing = {block, Line,[
 		begin
