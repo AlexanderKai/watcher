@@ -270,8 +270,8 @@ parse_expressions({Perm, Module, Function}, {match, Line, Var, Expression}, Orde
 			io:format("E1 ~p~nE2 ~p~n", [E1, E2]),
 		A = 1/0
 	end,
-	%ListVarsWatcher = lists:flatten(find_var(Var_Watcher)),
-	ListVarsWatcher = lists:flatten(Var_Watcher),
+	ListVarsWatcher = lists:flatten(find_var(Var_Watcher)),
+	%ListVarsWatcher = lists:flatten(Var_Watcher),
 
 	Tracing = {block, Line,[
 		begin
