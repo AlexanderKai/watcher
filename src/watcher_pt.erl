@@ -6,7 +6,7 @@ get_filter(Module) ->
 	case All of
 		[] ->
 			Res = ets:lookup(watcher, Module),
-			io:format("get_filter Module ~p~n", [Res]),
+			%io:format("get_filter Module ~p~n", [Res]),
 			case Res of
 				[] ->
 					false;
@@ -14,7 +14,7 @@ get_filter(Module) ->
 					%io:format("get_filter/1 Res ~p~n",[Res]),
 					lists:max([
 						begin
-							io:format("R ~p~n", [R]), 
+							%io:format("R ~p~n", [R]), 
 						case R of
 							{Mod, Func} ->
 								false;
@@ -58,24 +58,25 @@ parse_transform(AST, _Options) ->
 
 	%io:format("Perm module ~p~n", [Perm]),
 	%io:format("Transforming ~p~n", [Module]),
-	Res = [parse({Perm, Module}, T) || T <- AST],
+	Res = try
+	R = [parse({Perm, Module}, T) || T <- AST],
 	%io:format("============================Original========================~n~p~n", [AST]),
 	%io:format("============================Modified========================~n~p~n", [Res]),
 	%io:format("~60.w~60.w", [AST, Res]),
-	file:write_file("orig", io_lib:format("~p.~n", [AST])),
-	file:write_file("modf", io_lib:format("~p.~n", [Res])),
-	try
-	Check = erl_lint:module(Res),
-	io:format("============================Check========================~n~p~n", [Check])
+	R
 	catch
 		E1:E2 -> io:format("E1~p~nE2~p~n", [E1, E2]),
 				 io:format("Stack ~p~n",[erlang:get_stacktrace()])
 	end,
+	Check = erl_lint:module(Res),
+	io:format("============================Check========================~n~p~n", [Check]),
+	file:write_file("orig", io_lib:format("~p.~n", [AST])),
+	file:write_file("modf", io_lib:format("~p.~n", [Res])),
 	Res. 
 
 parse({ModulePerm, Module}, {function, Line, Function, Arity, Clauses}) ->
 	Perm = ModulePerm orelse get_filter(Module, Function), 
-	io:format("Perm 2 ~p~nget_filter(Module, Function)~p~n", [Perm, get_filter(Module,Function)]), 
+	%io:format("Perm 2 ~p~nget_filter(Module, Function)~p~n", [Perm, get_filter(Module,Function)]), 
 	NewClauses = lists:map(
 		fun(TE) ->
 			parse_func_clauses({Perm, Module, Function}, TE)
@@ -129,8 +130,59 @@ parse_clauses({P,M,F}, {clause,Line,Arguments,GuardSeq,Expressions}) ->
 	Expressions),
 	{clause, Line, Arguments, GuardSeq, NewExpressions}.
 
-%var_watcher(V) ->
-%	var_watcher(V, []).
+%var_watcher_safe(V) ->
+%	var_watcher_safe(V, []).
+%
+%var_watcher_safe(begin, Var) ->
+%	var_watcher_safe(Var, [])
+%
+var_watcher_safe(List) when is_list(List) ->
+	lists:map(
+		fun(V) -> 
+			var_watcher_safe(V) 
+		end, 
+	List);
+
+var_watcher_safe({string, Line, String}) ->
+	{string, Line, String};
+
+var_watcher_safe({atom, Line, Atom}) ->
+	{atom, Line, Atom};
+
+var_watcher_safe({var, Line, Var}) ->
+	ListAtom = atom_to_list(Var),
+	CheckUnbound = hd(ListAtom),
+	%io:format("CheckUnbound ~p~n", [CheckUnbound]),
+	case CheckUnbound of
+		95 ->
+			{string, Line, ListAtom};
+		_ ->
+			{var, Line, list_to_atom(ListAtom ++ "_WTCH")}
+	end;
+
+%var_watcher_safe({var, Line, Var}) ->
+%	{var, Line, list_to_atom(atom_to_list(Var) ++ "_WTCH")};
+
+var_watcher_safe({cons, Line, Head, Tail}) ->
+	{cons, Line, var_watcher_safe(Head), var_watcher_safe(Tail)};
+
+var_watcher_safe({nil, Line}) ->
+	{nil, Line};
+
+var_watcher_safe({tuple, Line, Elements}) ->
+	Vars =lists:map(
+		fun(V) -> 
+			var_watcher_safe(V) 
+		end, 
+	Elements),
+	{tuple, Line, Vars}.
+
+var_watcher(List) when is_list(List) ->
+	lists:map(
+		fun(V) -> 
+			var_watcher(V) 
+		end, 
+	List);
 
 var_watcher({string, Line, String}) ->
 	{string, Line, String};
@@ -141,9 +193,10 @@ var_watcher({atom, Line, Atom}) ->
 var_watcher({var, Line, Var}) ->
 	ListAtom = atom_to_list(Var),
 	CheckUnbound = hd(ListAtom),
+	%io:format("CheckUnbound ~p~n", [CheckUnbound]),
 	case CheckUnbound of
-		"_" ->
-			{string, Line, ListAtom};
+		%95 ->
+		%	{string, Line, ListAtom};
 		_ ->
 			{var, Line, list_to_atom(ListAtom ++ "_WTCH")}
 	end;
@@ -158,11 +211,19 @@ var_watcher({nil, Line}) ->
 	{nil, Line};
 
 var_watcher({tuple, Line, Elements}) ->
-	lists:map(
+	Vars =lists:map(
 		fun(V) -> 
 			var_watcher(V) 
 		end, 
-	Elements).
+	Elements),
+	{tuple, Line, Vars}.
+
+find_var(List) when is_list(List) ->
+	lists:map(
+		fun(V) -> 
+			find_var(V) 
+		end, 
+	List);
 
 find_var({var, _Line, Var}) ->
 	[Var];
@@ -262,7 +323,6 @@ parse_expressions({Perm, Module, Function}, Exp) ->
 parse_expressions({Perm, Module, Function}, {match, Line, Var, Expression}, Order) ->
 	Vars = lists:flatten(find_var(Var)),
 	%io:format("Perm 3 ~p~n", [Perm]),
-	io:format("Vars ~p~n", [Vars]),
 	Var_Watcher = try
 		var_watcher(Var)
 	catch
@@ -270,7 +330,8 @@ parse_expressions({Perm, Module, Function}, {match, Line, Var, Expression}, Orde
 			io:format("E1 ~p~nE2 ~p~n", [E1, E2]),
 		A = 1/0
 	end,
-	ListVarsWatcher = lists:flatten(find_var(Var_Watcher)),
+	VarWatcherSafe = var_watcher_safe(Var),
+	ListVarsWatcherSafe = lists:flatten(find_var(VarWatcherSafe)),
 	%ListVarsWatcher = lists:flatten(Var_Watcher),
 
 	Tracing = {block, Line,[
@@ -279,10 +340,18 @@ parse_expressions({Perm, Module, Function}, {match, Line, Var, Expression}, Orde
 		io_format({Module, Function}, V, Line)
 		end
 	||
-		V <- ListVarsWatcher, Perm orelse get_filter(Module, Function, V) == true
+		V <- ListVarsWatcherSafe, Perm orelse get_filter(Module, Function, V) == true
 	]},
+	case Line > 90 andalso Line < 105 of
+		true -> 
+	io:format("Vars ~p~n", [Vars]),
 	io:format("Tracing ~p~n", [Tracing]),
 	io:format("VarWatcher ~p~n", [Var_Watcher]),
+	io:format("ListVarWatcher ~p~n", [ListVarsWatcherSafe]),
+	io:format("------------------------------------~n", []);
+		_ ->
+			[]
+	end,
 
 	case Tracing of
 		{block, Line, []} -> 
@@ -290,22 +359,31 @@ parse_expressions({Perm, Module, Function}, {match, Line, Var, Expression}, Orde
 		_ ->
 			case Order of
 				'after' ->
-					{block, Line, 
+					TT = {block, Line, 
 					 	[
 						 	{match, Line, Var_Watcher, parse_expressions({Perm, Module, Function}, Expression, Order)}
 							,
 							Tracing,
-							{block, Line,
-								lists:map(
-								fun(V) -> 
-									{match, Line, Var, Var_Watcher}
-								end, 
-								Vars)
+							{block, Line,[
+								%lists:map(
+								%fun(V) -> 
+									{match, Line, Var, VarWatcherSafe}]
+								%end, 
+								%Vars)
 							}
 							%,
 							%parse_expressions({Perm, Module, Function}, Expression, Order)
 						] 
-					};
+					},
+					
+					case Line > 90 andalso Line < 105 of
+						true -> 
+							io:format("TT ~p~n", [TT]);
+					_ ->
+						[]
+					end,
+					TT
+					;
 				'not_trace' ->
 					{block, Line, 
 					 	[

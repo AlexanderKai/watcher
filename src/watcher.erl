@@ -55,28 +55,28 @@ find_source_in_line([H|T], _, _) ->
 		false.
 
 format([MF, Line, Variable, Value]) ->
-	Var = case string:tokens(Variable, "_WTCH") of
+	Var = list_to_binary(case string:tokens(Variable, "_WTCH") of
 		[] -> Variable;
 		V -> V
-	end,
+	end),
 	case is_list(Value) of
 		true ->
 			Test = list_to_binary(io_lib:print(Value)),
 			Length = length(Value),
 			%case byte_size(Test) > 50 orelse Length > 25  of
 			%	true ->
-					io:format("~145.145.-s",["-"]),
-					io:format("~70.w|~5.w|~70.s|", [MF, Line, Var]),
-					io:format("~145.145.-s",["-"]),
+					io:format("~148.148.-s~n",["-"]),
+					io:format("|~69.s|~70.w|~5.w|~n", [Var, MF, Line]),
+					io:format("~148.148.-s~n",["-"]),
 					io:format("~p~n", [Value]);
 			%	_ ->
 			%		io:format("~50.w|~5.w|~30.s|~60.w~n",[MF, Line, Var, Value])
 			%end;
 		_ ->
 			%io:format("~50.w|~5.w|~30.s|~60.w~n",[MF, Line, Variable, Value])
-			io:format("~145.145.-s",["-"]),
-			io:format("~70.w|~5.w|~70.s|", [MF, Line, Var]),
-			io:format("~145.145.-s",["-"]),
+			io:format("~148.148.-s~n",["-"]),
+			io:format("|~69.s|~70.w|~5.w|~n", [Var, MF, Line]),
+			io:format("~148.148.-s~n",["-"]),
 			io:format("~p~n", [Value])
 	end.
 
