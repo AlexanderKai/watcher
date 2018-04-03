@@ -45,7 +45,7 @@ sort(Files,RegExps) ->
 
 reg_exp(FullName, Regs) ->
 	Found = [
-		case re:run(FullName, ".*/" ++ Reg ++ ".*.erl") of
+		case re:run(FullName, ".*?/" ++ Reg ++ "(\.erl)|(\.beam)") of
 			{match, _} ->
 				FullName;
 			_ ->
@@ -54,18 +54,8 @@ reg_exp(FullName, Regs) ->
 	||
 		Reg <- Regs
 	],
-	Found2 = [
-		case re:run(FullName, ".*/" ++ Reg ++ ".*.beam") of
-			{match, _} ->
-				FullName;
-			_ ->
-				undefined
-		end
-	||
-		Reg <- Regs
-	],
-	[F || F <- Found, F =/= undefined] ++ [F || F <- Found2, F =/= undefined].
-	
+	[F || F <- Found, F =/= undefined].
+
 find_files([File|T], Dir, Reg, Recursive, Fun, Acc0) ->
 	FullName = filename:join([Dir,File]),
 	%io:format("FullName ~p~n", [FullName]),

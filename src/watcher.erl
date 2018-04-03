@@ -194,7 +194,7 @@ handle_call({compile, Type}, _From, #state{}=State) ->
 				{{M, F}, V} -> M;
 				{M, F} -> M;
 				{M} -> M			
-			end) ++ "."
+			end)
 	||
 		T <- ListORules, element(1, T) =/= 'ALL'
 	]),
