@@ -45,7 +45,7 @@ sort(Files,RegExps) ->
 
 reg_exp(FullName, Regs) ->
 	Found = [
-		case re:run(FullName, ".*?/" ++ Reg ++ "(\.erl)|(\.beam)") of
+		case re:run(FullName, "^(.+?)/(" ++ Reg ++ ")([.]((erl)|(beam)))$", [{capture,none,list}]) of
 			{match, _} ->
 				FullName;
 			_ ->
