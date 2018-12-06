@@ -3,11 +3,9 @@
 
 -export([start_link/1, start/0]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
-         code_change/3, raw_rule/1, rule/1, rule/2, clear/0, on/0, off/0, find_source_in_line/3, format/1, options/2]).
+         code_change/3, raw_rule/1, rule/1, rule/2, clear/0, on/0, off/0, find_source_in_line/3, format/1, compiler_options/2, get_backend/0, settings/1]).
 
-
--record(state, {rules}).
-
+-include("../include/watcher.hrl").
 
 start() -> watcher_sup:start_link().
 
@@ -17,17 +15,36 @@ start_link(Args) ->
 init(_Args) ->
 	process_flag(trap_exit, true),
 	self() ! init,
-	{ok, #state{rules=[]}}.
+	{ok, #{rules => []}}.
 
 raw_rule(Rule) ->
 	gen_server:call(?MODULE, {rule, Rule}).
 
-%watcher:rule(my_module).
-options(Module, Options) ->
+get_session() ->
+	[{settings, Settings}] = ets:lookup(watcher_settings, settings),
+	SessionN = maps:get(session, Settings, 1),
+	SessionN.
+
+update_session() ->
+	[{settings, Settings}] = ets:lookup(watcher_settings, settings),
+	SessionN = maps:get(session, Settings, 1),
+	NewSettings = Settings#{session := SessionN + 1},
+	ets:insert(watcher_settings, [{settings, NewSettings}]).
+
+compiler_options(Module, Options) ->
 	gen_server:call(?MODULE, {options, {Module, Options}}).
 
+%#{backend => console | mnesia}
+settings(Settings) ->
+	gen_server:call(?MODULE, {settings, {Settings}}).
+
+get_backend() ->
+	[{settings, Settings}] = ets:lookup(watcher_settings, settings),
+	Backend = maps:get(backend, Settings, [mnesia]),
+	Backend.
+
 rule(Module) ->
-	Send = case is_list(module) of
+	Send = case is_list(Module) of
 		false ->
 			[Module];
 		_ ->
@@ -54,15 +71,18 @@ find_source_in_line([H1|[H2|T]], Pos, LengthFull) ->
 find_source_in_line([H|T], _, _) ->
 		false.
 
-format([MF, Line, Variable, Value]) ->
-	Var = list_to_binary(case string:tokens(Variable, "_WTCH") of
-		[] -> Variable;
-		V -> V
-	end),
+cut_wtch({return, _, _} = V) ->
+	V;
+				   
+cut_wtch(V) ->
+	list_to_binary(string:replace(V, "_WTCH", "")).
+				   
+format([console, MF, Line, Variable, Value]) ->
+	Var = cut_wtch(Variable),
 	case is_list(Value) of
 		true ->
-			Test = list_to_binary(io_lib:print(Value)),
-			Length = length(Value),
+			%Test = list_to_binary(io_lib:print(Value)),
+			%Length = length(Value),
 			%case byte_size(Test) > 50 orelse Length > 25  of
 			%	true ->
 					io:format("~148.148.-s~n",["-"]),
@@ -78,7 +98,13 @@ format([MF, Line, Variable, Value]) ->
 			io:format("|~69.s|~70.w|~5.w|~n", [Var, MF, Line]),
 			io:format("~148.148.-s~n",["-"]),
 			io:format("~p~n", [Value])
-	end.
+	end;
+
+format([mnesia, {M, F}, Line, Variable, Value, Same]) ->
+	Var = cut_wtch(Variable),
+	Session = get_session(),
+	Res = mnesia:transaction(fun() -> mnesia:write(#watcher_history{name = erlang:unique_integer([monotonic]), session = Session, pid = self(), module = M, function = F, line = Line, time = erlang:monotonic_time(), var = Var, value = Value, same = list_to_binary(Same)}) end),
+	io:format("Res format mnesia ~p~n", [Res]).
 
 on() ->
 	gen_server:call(?MODULE, {compile, trace}, infinity).
@@ -110,11 +136,16 @@ compile_file([F1, F2], Type) ->
 	ShortName = hd(lists:reverse(Tokens)),
 	[ModuleName, _]  = string:tokens(ShortName, "."),
 	Outdir = lists:flatten(string:replace(Beam, ShortName, "", trailing)),
+
+	Lines = string:split(ErlBinary, <<"\n">>, all),
+	FormattedLines = format_lines(Lines),
+	io:format("FormattedLines ~p~n", [FormattedLines]),
+	ets:insert(watcher_sources, [{{get_session(), list_to_atom(ModuleName)}, FormattedLines}]),
 	%io:format("Compile Ebin dir ~p~n", [Outdir]),
 
 	io:format("ShortName ~p~n", [list_to_atom(ModuleName)]),
 	[{_,ModuleOptions}] = ets:lookup(watcher_module_options, list_to_atom(ModuleName)),
-	Res = compile:file(Erl, [verbose, {outdir,Outdir},  
+	Res = compile:file(Erl, [verbose, return_errors, {outdir,Outdir},  
 							 			%{parse_transform, lager_transform},
 							            %{parse_transform, cut},
 							            %{parse_transform, boss_db_pmod_pt},
@@ -141,13 +172,35 @@ compile_file([F1, F2], Type) ->
 clear() ->
 	gen_server:call(?MODULE, clear).
 
+%format_lines(Lines) ->
+%	format_lines_do(Lines, 1, #{}).
+%
+%format_lines_do([], _, Acc) ->
+%	Acc;
+%
+%format_lines_do([H|T], Line, Acc) ->
+%	format_lines_do(T, Line + 1, maps:put(Line,H,Acc)).
+	
+format_lines(Lines) ->
+	format_lines_do(Lines, 1, []).
+
+format_lines_do([], _, Acc) ->
+	lists:reverse(Acc);
+
+format_lines_do([H|T], Line, Acc) ->
+	format_lines_do(T, Line + 1, [#{line => Line, string => H} | Acc]).
+	
 %parse_rule(Rule) ->
 
-handle_call({options, {Module, Options}}, _From, #state{}=State) ->
+handle_call({settings, {Settings}}, _From, #{}=State) ->
+	ets:insert(watcher_settings, {settings, Settings}),
+	{reply, ok, State};
+
+handle_call({options, {Module, Options}}, _From, #{}=State) ->
 	ets:insert(watcher_module_options, {Module, Options}),
 	{reply, ok, State};
 
-handle_call({rule, {Module, FunctionsVariables}}, _From, #state{}=State) ->
+handle_call({rule, {Module, FunctionsVariables}}, _From, #{}=State) ->
 	Insert = 
 	[
 	 	case is_tuple(Rule) of
@@ -177,7 +230,7 @@ handle_call({rule, {Module, FunctionsVariables}}, _From, #state{}=State) ->
 	ets:insert(watcher, lists:flatten(Insert)),
 	{reply, ok, State};	
 
-handle_call({rule, Modules}, _From, #state{}=State) ->
+handle_call({rule, Modules}, _From, #{}=State) ->
 	[
 		ets:insert(watcher, {Module})
 	||
@@ -185,7 +238,7 @@ handle_call({rule, Modules}, _From, #state{}=State) ->
 	],
 	{reply, ok, State};	
 
-handle_call({compile, Type}, _From, #state{}=State) ->
+handle_call({compile, Type}, _From, #{}=State) ->
 	ListORules = ets:tab2list(watcher),
 	Modules = lists:usort(
 	[
@@ -238,7 +291,8 @@ handle_call({compile, Type}, _From, #state{}=State) ->
 
 	{reply, ok, State};	
 
-handle_call(clear, _From, #state{}=State) ->
+handle_call(clear, _From, #{}=State) ->
+	ets:delete_all_objects(watcher_settings),
 	ets:delete_all_objects(watcher),
 	ets:delete_all_objects(watcher_module_options),
 	{reply, ok, State}.	
@@ -246,12 +300,19 @@ handle_call(clear, _From, #state{}=State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info(init, #state{rules=Rules}=State) ->
+handle_info(init, #{rules := Rules}=State) ->
+	watcher_http_app:start(),
+	application:ensure_all_started(mnesia),
+	mnesia:create_table(watcher_history, 
+		[{access_mode, read_write}, {record_name, watcher_history}, {attributes, [name, session, pid, module, function, line, time, var, value, same]}, {index, [pid, session, module, function, line, time, var, value, same]}, {type, ordered_set}]),
+	ets:new(watcher_settings, [named_table, {read_concurrency, true}, set, public]),
+	ets:insert(watcher_settings, {settings, #{session => 1}}),
 	ets:new(watcher, [named_table, {read_concurrency, true}, bag, public]),
 	ets:new(watcher_module_options, [named_table, {read_concurrency, true}, set, public]),
+	ets:new(watcher_sources, [named_table, {read_concurrency, true}, set, public]),
     {noreply, State};
 
-handle_info({check, From, Name, MFA}, #state{rules=Rules}=State) ->
+handle_info({check, From, Name, MFA}, #{rules := Rules}=State) ->
     {noreply, State}.
 
 terminate(_Reason, _State) ->

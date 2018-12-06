@@ -2,8 +2,8 @@
 	[
 		{description, "Watcher"},
 		{vsn, "0.1"},
-		{applications,[kernel,stdlib]},
-		{modules,[watcher]},
+		{applications,[kernel,stdlib, watcher_http_app]},
+		{modules,[watcher, watcher_pt, watcher_sup, watcher_http_sup, watcher_http_handler, watcher_http_app]},
 		{registered,[watcher]},
 	 	{mod,{watcher,[]}},
 		{env, []}

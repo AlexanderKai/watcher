@@ -1,6 +1,8 @@
 -module(watcher_pt).
 -export([parse_transform/2]).
 
+-compile([{parse_transform, lager_transform}]).
+
 get_filter(Module) ->
 	All = ets:lookup(watcher, 'ALL'),
 	case All of
@@ -43,7 +45,7 @@ get_filter(Module, Function) ->
 
 get_filter(Module, Function, Variable) ->
 	Res = ets:lookup(watcher, {Module, Function}),
-	%io:format("get_filter/3 Res ~p~nModule ~p~nFunction ~p~nVariable ~p~n",[Res, Module, Function, Variable]),
+	io:format("get_filter/3 Res ~p~nModule ~p~nFunction ~p~nVariable ~p~n",[Res, Module, Function, Variable]),
 	case lists:keymember('ALL', 2, Res) of
 		false ->
 			lists:keymember(Variable, 2, Res);
@@ -58,16 +60,16 @@ parse_transform(AST, _Options) ->
 
 	%io:format("Perm module ~p~n", [Perm]),
 	%io:format("Transforming ~p~n", [Module]),
+	lager:info("============================Original========================~n~p~n", [AST]),
 	Res = try
 	R = [parse({Perm, Module}, T) || T <- AST],
-	%io:format("============================Original========================~n~p~n", [AST]),
-	%io:format("============================Modified========================~n~p~n", [Res]),
 	%io:format("~60.w~60.w", [AST, Res]),
 	R
 	catch
 		E1:E2 -> io:format("E1~p~nE2~p~n", [E1, E2]),
 				 io:format("Stack ~p~n",[erlang:get_stacktrace()])
 	end,
+	lager:info("============================Modified========================~n~p~n", [Res]),
 	Check = erl_lint:module(Res),
 	io:format("============================Check========================~n~p~n", [Check]),
 	file:write_file("orig", io_lib:format("~p.~n", [AST])),
@@ -100,11 +102,11 @@ find_module([_H|T]) ->
 
 parse_func_clauses({P,M,F}, {clause,Line,Arguments,GuardSeq,Expressions}) ->
 	FuncPattern0 = Arguments,
-	%io:format("parse_func_clauses Arguments~p~n", [Arguments]),
+	io:format("parse_func_clauses Arguments~p~n", [Arguments]),
 	FunctionMatching = lists:flatten(
 		lists:map(
 		fun(V) ->
-	%		io:format("parse func_expressions V ~p~n~p~n~p~n~p~n", [P, M, F, V]),
+			io:format("parse func_expressions V ~p~n~p~n~p~n~p~n", [P, M, F, V]),
 			parse_func_expressions({P,M,F}, V)
 		end,
 	Arguments)),
@@ -136,25 +138,33 @@ parse_clauses({P,M,F}, {clause,Line,Arguments,GuardSeq,Expressions}) ->
 %var_watcher_safe(begin, Var) ->
 %	var_watcher_safe(Var, [])
 %
-var_watcher_safe(List) when is_list(List) ->
+
+generate() ->
+	["WTCH" | integer_to_list(rand:uniform(1000000000))].
+
+var_watcher_safe({_, Line, _} = V) ->
+	Res = var_watcher_safe_do(V),
+	{{var, Line, generate()}, Res}.
+
+var_watcher_safe_do(List) when is_list(List) ->
 	lists:map(
 		fun(V) -> 
-			var_watcher_safe(V) 
+			var_watcher_safe_do(V) 
 		end, 
 	List);
 
-var_watcher_safe({string, Line, String}) ->
+var_watcher_safe_do({string, Line, String}) ->
 	{string, Line, String};
 
-var_watcher_safe({atom, Line, Atom}) ->
+var_watcher_safe_do({atom, Line, Atom}) ->
 	{atom, Line, Atom};
 
-var_watcher_safe({var, Line, Var}) ->
+var_watcher_safe_do({var, Line, Var}) ->
 	ListAtom = atom_to_list(Var),
 	CheckUnbound = hd(ListAtom),
 	%io:format("CheckUnbound ~p~n", [CheckUnbound]),
 	case CheckUnbound of
-		95 ->
+		$_ ->
 			{string, Line, ListAtom};
 		_ ->
 			{var, Line, list_to_atom(ListAtom ++ "_WTCH")}
@@ -163,19 +173,36 @@ var_watcher_safe({var, Line, Var}) ->
 %var_watcher_safe({var, Line, Var}) ->
 %	{var, Line, list_to_atom(atom_to_list(Var) ++ "_WTCH")};
 
-var_watcher_safe({cons, Line, Head, Tail}) ->
-	{cons, Line, var_watcher_safe(Head), var_watcher_safe(Tail)};
+var_watcher_safe_do({cons, Line, Head, Tail}) ->
+	{cons, Line, var_watcher_safe_do(Head), var_watcher_safe_do(Tail)};
 
-var_watcher_safe({nil, Line}) ->
+var_watcher_safe_do({nil, Line}) ->
 	{nil, Line};
 
-var_watcher_safe({tuple, Line, Elements}) ->
+var_watcher_safe_do({map, Line, Map, Elements}) ->
+	{map, Line, Map, Elements};
+
+var_watcher_safe_do({map, Line, Map}) ->
 	Vars =lists:map(
 		fun(V) -> 
-			var_watcher_safe(V) 
+			var_watcher_safe_do(V) 
+		end, 
+	Map),
+	{map, Line, Vars};
+
+var_watcher_safe_do({map_field_exact, Line, Key, Var}) ->
+	{map_field_exact, Line, Key, var_watcher_safe_do(Var)};
+
+var_watcher_safe_do({tuple, Line, Elements}) ->
+	Vars =lists:map(
+		fun(V) -> 
+			var_watcher_safe_do(V) 
 		end, 
 	Elements),
-	{tuple, Line, Vars}.
+	{tuple, Line, Vars};
+
+var_watcher_safe_do(V) ->
+	V.
 
 var_watcher(List) when is_list(List) ->
 	lists:map(
@@ -210,13 +237,42 @@ var_watcher({cons, Line, Head, Tail}) ->
 var_watcher({nil, Line}) ->
 	{nil, Line};
 
+var_watcher({map, Line, Map, Elements}) ->
+	{map, Line, Map, Elements};
+
+var_watcher({map, Line, Map}) ->
+	Vars =lists:map(
+		fun(V) -> 
+			var_watcher(V) 
+		end, 
+	Map),
+	{map, Line, Vars};
+
+var_watcher({map_field_exact, Line, Key, Var}) ->
+	{map_field_exact, Line, Key, var_watcher(Var)};
+
 var_watcher({tuple, Line, Elements}) ->
 	Vars =lists:map(
 		fun(V) -> 
 			var_watcher(V) 
 		end, 
 	Elements),
-	{tuple, Line, Vars}.
+	{tuple, Line, Vars};
+
+var_watcher(V) ->
+	V.
+
+find_var({map, _Line, Map}) ->
+	io:format("find_var map~n"),
+	lists:map(
+		fun(V) -> 
+			find_var(V) 
+		end, 
+	Map);
+
+find_var({map_field_exact, _Line, Key, Var}) ->
+	io:format("find_var map_field_exact~n"),
+	find_var(Var);
 
 find_var(List) when is_list(List) ->
 	lists:map(
@@ -249,16 +305,18 @@ find_var(_V) ->
 parse_func_expressions({Perm, Module, Function}, {match, Line, Var, Expression}) ->
 	Exp = lists:flatten(find_var(Expression)),
 	Vars = lists:flatten(find_var(Var)),
+	%io:format("parse_func_expressions~n"),
 	%io:format("Exps ~p~n", [Exp]),
 	%io:format("Vars ~p~n", [Vars]),
+	Same = generate(),
 	Tracing = {block, Line,
 			[
-				io_format({Module, Function}, V, Line)
+				io_format({Module, Function}, V, Line, Same)
 			||
 				V <- Vars, Perm orelse get_filter(Module, Function, V) == true
 			] ++
 			[
-				io_format({Module, Function}, V, Line)
+				io_format({Module, Function}, V, Line, Same)
 			||
 				V <- Exp, Perm orelse get_filter(Module, Function, V) == true
 			]},
@@ -269,6 +327,16 @@ parse_func_expressions({Perm, Module, Function}, {match, Line, Var, Expression})
 		V ->
 			V
 	end;
+
+%parse_func_expressions({Perm, Module, Function}, {map_field_exact, Line, Key, Value}) ->
+%	%Vars = lists:flatten(find_var(Var)),
+%	%io:format("Tracing ~p~n", [Tracing]),
+%	parse_func_expressions({Perm, Module, Function}, Value);
+
+%parse_func_expressions({Perm, Module, Function}, {map, Line, Map}) ->
+%	%Vars = lists:flatten(find_var(Var)),
+%	%io:format("Tracing ~p~n", [Tracing]),
+%	parse_func_expressions({Perm, Module, Function}, Map);
 
 parse_func_expressions({Perm, Module, Function}, {var, Line, '_'}) ->
 	[];
@@ -291,7 +359,8 @@ parse_func_expressions(_, V) ->
 	[].
 
 parse_expressions_tail({Perm, Module, Function}, {match, Line, A, B}) ->
-	Var = list_to_atom("Res_" ++ atom_to_list(Module) ++ "_" ++atom_to_list(Function)),
+	%Var = list_to_atom("Res_" ++ atom_to_list(Module) ++ "_" ++atom_to_list(Function)),
+	Var = {return, Module, Function},
 	ResVar = {var, Line, Var},
 	{block, Line,
 		[
@@ -305,7 +374,8 @@ parse_expressions_tail({Perm, Module, Function}, {match, Line, A, B}) ->
 
 parse_expressions_tail({Perm, Module, Function}, Exp) ->
 	Line = element(2, Exp),
-	Var = list_to_atom("Res_" ++ atom_to_list(Module) ++ "_" ++atom_to_list(Function)),
+	Var = {return, Module, Function},
+	%Var = list_to_atom("Res_" ++ atom_to_list(Module) ++ "_" ++atom_to_list(Function)),
 	ResVar = {var, Line, Var},
 	{block, Line,
 		[
@@ -321,37 +391,42 @@ parse_expressions({Perm, Module, Function}, Exp) ->
 	parse_expressions({Perm, Module, Function}, Exp, 'after').
 
 parse_expressions({Perm, Module, Function}, {match, Line, Var, Expression}, Order) ->
-	Vars = lists:flatten(find_var(Var)),
+	%Vars = lists:flatten(find_var(Var)),
 	%io:format("Perm 3 ~p~n", [Perm]),
 	Var_Watcher = try
 		var_watcher(Var)
 	catch
 		E1:E2 ->
-			io:format("E1 ~p~nE2 ~p~n", [E1, E2]),
+			io:format("E1 ~p~nE2 ~p~nStack ~p~n", [E1, E2, erlang:get_stacktrace()]),
 		A = 1/0
 	end,
-	VarWatcherSafe = var_watcher_safe(Var),
+	io:format("Line ~p~nVar_Watcher ~p~n", [Line, Var_Watcher]),
+	{MiddleVar, VarWatcherSafe} = var_watcher_safe(Var),
+	io:format("Var_Watcher_safe ~p~n", [VarWatcherSafe]),
 	ListVarsWatcherSafe = lists:flatten(find_var(VarWatcherSafe)),
 	%ListVarsWatcher = lists:flatten(Var_Watcher),
+	io:format("Vars ~p~n", [ListVarsWatcherSafe]),
 
+	Same = generate(),
 	Tracing = {block, Line,[
 		begin
 		%io:format("get_filter(Module, Function, V) ~p~n", [get_filter(Module, Function, V)]),
-		io_format({Module, Function}, V, Line)
+		io_format({Module, Function}, V, Line, Same)
 		end
 	||
 		V <- ListVarsWatcherSafe, Perm orelse get_filter(Module, Function, V) == true
 	]},
-	case Line > 90 andalso Line < 105 of
-		true -> 
-	io:format("Vars ~p~n", [Vars]),
+	%Tracing = {block, Line, []},
+	%case Line > 90 andalso Line < 105 of
+	%	true -> 
+	%io:format("Vars ~p~n", [Vars]),
 	io:format("Tracing ~p~n", [Tracing]),
-	io:format("VarWatcher ~p~n", [Var_Watcher]),
-	io:format("ListVarWatcher ~p~n", [ListVarsWatcherSafe]),
-	io:format("------------------------------------~n", []);
-		_ ->
-			[]
-	end,
+	%io:format("VarWatcher ~p~n", [Var_Watcher]),
+	%io:format("ListVarWatcher ~p~n", [ListVarsWatcherSafe]),
+	io:format("------------------------------------~n"),
+	%	_ ->
+	%		[]
+	%end,
 
 	case Tracing of
 		{block, Line, []} -> 
@@ -361,27 +436,29 @@ parse_expressions({Perm, Module, Function}, {match, Line, Var, Expression}, Orde
 				'after' ->
 					TT = {block, Line, 
 					 	[
-						 	{match, Line, Var_Watcher, parse_expressions({Perm, Module, Function}, Expression, Order)}
+						 	{match, Line, MiddleVar, 
+							 	{block, Line,
+							 		[
+										{match, Line, VarWatcherSafe, parse_expressions({Perm, Module, Function}, Expression, Order)}
+									]
+								}
+							} % продолжаем дальше трассировку
 							,
 							Tracing,
 							{block, Line,[
-								%lists:map(
-								%fun(V) -> 
-									{match, Line, Var, VarWatcherSafe}]
-								%end, 
-								%Vars)
+									{match, Line, Var, MiddleVar}]
 							}
 							%,
 							%parse_expressions({Perm, Module, Function}, Expression, Order)
 						] 
 					},
 					
-					case Line > 90 andalso Line < 105 of
-						true -> 
-							io:format("TT ~p~n", [TT]);
-					_ ->
-						[]
-					end,
+					%case Line > 90 andalso Line < 105 of
+					%	true -> 
+					%		io:format("TT ~p~n", [TT]);
+					%_ ->
+					%	[]
+					%end,
 					TT
 					;
 				'not_trace' ->
@@ -393,6 +470,26 @@ parse_expressions({Perm, Module, Function}, {match, Line, Var, Expression}, Orde
 			end
 	end;
 
+parse_expressions({P,M,F}, {'catch', Line, Exp}, Order) ->
+	NewExp = parse_expressions({P,M,F}, Exp, Order),
+	{'catch', Line, NewExp};
+
+parse_expressions({P,M,F}, {'try', Line, Tries, Cases, Catch, After}, Order) ->
+	io:format("parse try~n"),
+	NewTries = lists:map(
+		fun(V) -> 
+			io:format("parse try clause ~n~p~n", [V]),
+			parse_expressions({P,M,F}, V) 
+		end, 
+	Tries),
+	NewCatch = lists:map(
+		fun(V) -> 
+			io:format("parse try catch ~n~p~n", [V]),
+			parse_clauses({P,M,F}, V) 
+		end, 
+	Catch),
+	{'try', Line, NewTries, Cases, NewCatch, After};
+
 parse_expressions({P,M,F}, {'case', Line, Var, Clauses}, _) ->
 	NewClauses = lists:map(
 		fun(V) -> 
@@ -401,24 +498,39 @@ parse_expressions({P,M,F}, {'case', Line, Var, Clauses}, _) ->
 	Clauses),
 	{'case', Line, Var, NewClauses};
 
-parse_expressions(_, T, _) ->
-	T.
+parse_expressions(_, Exp, _) ->
+	Exp.
 
 get_from_arguments(Args) ->
 	[].
 
 io_format({Module, Function}, Var, Line) ->
+	io_format({Module, Function}, Var, Line, "0").
+
+io_format({Module, Function}, Var, Line, Same) ->
 	%{block, Line, []}.
+	Backend = watcher:get_backend(),
+	{block, Line, [
 	gen_remote_call(watcher,format,
 		[
 			%{string,Line,"~30.w|~5.w|~20.s|~40.p|~n"}, 
 			gen_list([
+				{atom, Line, B},
 				{tuple, Line,[{atom, Line, Module}, {atom, Line, Function}]},
 				{integer, Line, Line},
-			 	{string,Line,atom_to_list(Var)},
-			 	format_var(Var, Line)			
+			 	case Var of
+					{return, M, F} ->
+						{tuple, Line, [{atom, Line, return}, {atom, Line, M}, {atom, Line, F}]};
+					_ ->
+						{string,Line,atom_to_list(Var)}
+				end,
+			 	format_var(Var, Line),
+				{string, Line, Same}		
 			], Line)
-		], Line).
+		], Line)
+	||
+	B <- Backend
+	]}.
 %	gen_remote_call(io,format,
 %		[
 %			{string,Line,"~30.w|~5.w|~20.s|~40.p|~n"}, 
