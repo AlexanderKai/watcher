@@ -1,0 +1,330 @@
+<html>
+<head>
+<style>
+/*
+vim-hybrid theme by w0ng (https://github.com/w0ng/vim-hybrid)
+*/
+pre 
+{
+	margin: 0px;
+	padding: 0px;
+	height: 15pt;
+}
+
+td
+{
+	height: 15pt;
+	padding: 0px;
+}
+
+/*background color*/
+.hljs {
+  display: block;
+  overflow-x: auto;
+  padding: 0.5em;
+  background: #1d1f21;
+}
+
+/*selection color*/
+.hljs::selection,
+.hljs span::selection {
+  background: #373b41;
+}
+
+.hljs::-moz-selection,
+.hljs span::-moz-selection {
+  background: #373b41;
+}
+
+/*foreground color*/
+.hljs {
+  color: #c5c8c6;
+}
+
+/*color: fg_yellow*/
+.hljs-title,
+.hljs-name {
+  color: #f0c674;
+}
+
+/*color: fg_comment*/
+.hljs-comment,
+.hljs-meta,
+.hljs-meta .hljs-keyword {
+  color: #707880;
+}
+
+/*color: fg_red*/
+.hljs-number,
+.hljs-symbol,
+.hljs-literal,
+.hljs-deletion,
+.hljs-link {
+ color: #cc6666
+}
+
+/*color: fg_green*/
+.hljs-string,
+.hljs-doctag,
+.hljs-addition,
+.hljs-regexp,
+.hljs-selector-attr,
+.hljs-selector-pseudo {
+  color: #b5bd68;
+}
+
+/*color: fg_purple*/
+.hljs-attribute,
+.hljs-code,
+.hljs-selector-id {
+ color: #b294bb;
+}
+
+/*color: fg_blue*/
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-bullet,
+.hljs-tag {
+ color: #81a2be;
+}
+
+/*color: fg_aqua*/
+.hljs-subst,
+.hljs-variable,
+.hljs-template-tag,
+.hljs-template-variable {
+  color: #8abeb7;
+}
+
+/*color: fg_orange*/
+.hljs-type,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-quote,
+.hljs-section,
+.hljs-selector-class {
+  color: #de935f;
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: bold;
+}
+</style>
+
+<script src="https://code.jquery.com/jquery-1.9.1.min.js"></script>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.13.1/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.13.1/languages/erlang.min.js"></script>
+<script>hljs.initHighlightingOnLoad();</script>
+
+<script>
+	function unEntity(str){
+		return str.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+	}
+	
+	function slide(e) {
+    	//e.preventDefault();
+	    var el = $(e);
+		var elOffset = el.offset().top;
+		var elHeight = el.height();
+		var windowHeight = window.innerHeight;
+		var windowFullHeight = $(window).height();
+		var offset;
+
+		if (elHeight < windowFullHeight) {
+			offset = elOffset - (windowHeight / 2);
+		}
+		else {
+			offset = elOffset;
+		}
+
+	    $('html,body').animate({scrollTop: offset},'slow');
+	}
+
+	function isIntoView(el_) {
+		el = el_.get(0);
+		var rect = el.getBoundingClientRect();
+		var elemTop = rect.top;
+		var elemBottom = rect.bottom;
+
+		// Only completely visible elements return true:
+		var isVisible = (elemTop >= 0) && (elemBottom <= window.innerHeight);
+		// Partially visible elements return true:
+		//isVisible = elemTop < window.innerHeight && elemBottom >= 0;
+    	return isVisible;
+	}
+
+	$( document ).ready(function() {
+        console.log( "document loaded" );
+		if ($('#action').html() != undefined) {
+			console.log(($('#action').html()));
+			let action = $('#action').html();
+			let session = $('#session').html();
+			let module = $('#module').html();
+			let pid = unEntity($('#pid').html());
+			let execution_plan = null;
+			function get_action(action_id) {
+			$.get( `?get=action&session_id=${session}&pid_id=${pid}&module=${module}&action_id=${action_id}`, function( data ) {
+				//$( ".result" ).html( data );
+				console.log(data);
+				if ( isIntoView($(`#line${data.line}`)) == false )
+				{
+					slide(`#line${data.line}`);
+				}
+				if ($('#current').html() != '')
+				{
+					let current = $('#current').html();
+					$(`#line${current}`).css({"background-color":"white"});
+				}
+				action = action_id;
+				$('#current').html(data.line);
+				$(`#line${data.line}`).css({"background-color":"brown"});
+    
+			})};
+			get_action(action);
+			$('#next').click(
+				function() {
+					console.log(execution_plan);
+					for (var i=0; i < execution_plan.execution.length; i++) {
+						console.log(execution_plan.execution[i]);
+						let name = execution_plan.execution[i].name;
+						if (name == action) {
+							get_action(execution_plan.execution[i+1].name);
+							break;
+						}
+					}
+				}
+			);
+			$.get( `?get=pid_json&session_id=${session}&pid_id=${pid}`, function( data_execution ) {
+				//$( ".result" ).html( data );
+				console.log(data_execution);
+				execution_plan = data_execution;
+
+    
+			});
+		}
+		//$('pre code').each(function(i, block) {
+		//    hljs.highlightBlock(block);
+		//});
+    });
+ 
+    $( window ).on( "load", function() {
+        //console.log( "window loaded" );
+    });
+</script>
+</head>
+<body>
+{% if sessions %}
+<table style="border: 1px;">
+
+<th>Session</th>
+
+{% for v in sessions %}
+<tr>
+<td>
+	<a href="?get=session&id={{ v.session }}" >{{ v.session }}</a>
+</td>
+</tr>
+{% endfor %}
+
+</table>
+{% endif %}
+
+
+
+
+{% if pids %}
+Session: {{ session }} <br>
+<table style="border: 1px;">
+
+<th>Pid</th>
+
+{% for v in pids %}
+<tr>
+<td>
+	<a href="?get=pid&session_id={{ session }}&pid_id={{ v.pid }}" >{{ v.pid }}</a>
+</td>
+</tr>
+{% endfor %}
+
+</table>
+{% endif %}
+
+
+
+
+
+{% if raws %}
+Session: {{ session }} <br>
+Pid: {{ pid }} <br>
+<table style="border: 1px;">
+
+<th>Execution plan</th>
+
+{% for v in raws %}
+<tr>
+<td>
+	<a href="?get=module&session_id={{ session }}&pid_id={{ v.pid }}&action_id={{ v.name }}" >{{ v.name }}</a>
+</td>
+<td>
+	{{ v.time }}
+</td>
+<td>
+	{{ v.module }}
+</td>
+<td>
+	{{ v.function }}
+</td>
+<td>
+	{{ v.string_line }}
+</td>
+</tr>
+{% endfor %}
+
+</table>
+{% endif %}
+
+
+
+
+{% if lines %}
+Session: {{ session }} <br>
+Pid: {{ pid }} <br>
+Module: {{ module }} <br>
+<button id="next">Next</button>
+<div id="action" style="display:none;">{{ action }}</div>
+<div id="session" style="display:none;">{{ session }}</div>
+<div id="module" style="display:none;">{{ module }}</div>
+<div id="pid" style="display:none;">{{ pid }}</div>
+<div id="current" style="display:none;"></div>
+<table cellspacing="0" style="border: 1px;">
+
+<th>Source</th>
+
+
+{% for v in lines %}
+<tr>
+<td width="5%">
+	<pre><code class="erlang">{{ v.line }}</code></pre>
+</td>
+<td width="1%" id="line{{ v.line }}">
+	&nbsp;
+</td>
+<td width="94%">
+	<pre><code class="erlang">{% if v.string == '' %}&nbsp; {% else %}{{ v.string }}{% endif %}</code></pre>
+</td>
+{% endfor %}
+
+</table>
+
+{% endif %}
+
+
+
+
+</body>
+</html>
