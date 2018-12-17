@@ -4,17 +4,40 @@
 /*
 vim-hybrid theme by w0ng (https://github.com/w0ng/vim-hybrid)
 */
-pre 
-{
+body {
+margin: 0px;
+padding: 0px;
+}
+
+.navigator {
+    position: fixed;
+    background-color: antiquewhite;
+    width: 100%;
+    z-index: 100;
+    margin: 0;
+	top:0px;
+}
+
+.listing {
+	z-index: 0;
+	margin: 0;
+}
+
+pre {
 	margin: 0px;
 	padding: 0px;
 	height: 15pt;
 }
 
-td
-{
+td {
 	height: 15pt;
 	padding: 0px;
+}
+
+.variable {
+	display:inline-block;
+	color: #5cd2e6;
+	margin-left: 10px;
 }
 
 /*background color*/
@@ -122,6 +145,9 @@ td
 <script>hljs.initHighlightingOnLoad();</script>
 
 <script>
+
+	var variables = {};
+	
 	function unEntity(str){
 		return str.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
 	}
@@ -159,62 +185,156 @@ td
 	}
 
 	$( document ).ready(function() {
-        console.log( "document loaded" );
 		if ($('#action').html() != undefined) {
-			console.log(($('#action').html()));
-			let action = $('#action').html();
-			let session = $('#session').html();
-			let module = $('#module').html();
-			let pid = unEntity($('#pid').html());
+			let action_v = $('#action').html();
+			let session_v = $('#session').html();
+			let module_v = $('#module').html();
+			let pid_v = unEntity($('#pid').html());
 			let execution_plan = null;
-			function get_action(action_id) {
-			$.get( `?get=action&session_id=${session}&pid_id=${pid}&module=${module}&action_id=${action_id}`, function( data ) {
-				//$( ".result" ).html( data );
-				console.log(data);
-				if ( isIntoView($(`#line${data.line}`)) == false )
-				{
-					slide(`#line${data.line}`);
+			let modules_variables = [];
+			url =  `?get=action&session_id=${session_v}&pid_id=${pid_v}&module=${module_v}`;
+			$.get(url, function( data ) {
+				variables = data.lines;
+				$.get( `?get=pid_json&session_id=${session_v}&pid_id=${pid_v}`, function( data_execution ) {
+					//$( ".result" ).html( data );
+					execution_plan = data_execution;
+					let arr =collect_actions("inclusive");
+					get_action(arr);
+        
+				});
+			});
+			function get_action(action_record) {
+				//console.log(data);
+				if (modules_variables[`${module_v}`] == undefined) {
+					modules_variables[`${module_v}`] = []
 				}
-				if ($('#current').html() != '')
-				{
-					let current = $('#current').html();
-					$(`#line${current}`).css({"background-color":"white"});
-				}
-				action = action_id;
-				$('#current').html(data.line);
-				$(`#line${data.line}`).css({"background-color":"brown"});
-    
-			})};
-			get_action(action);
-			$('#next').click(
-				function() {
-					console.log(execution_plan);
-					for (var i=0; i < execution_plan.execution.length; i++) {
-						console.log(execution_plan.execution[i]);
-						let name = execution_plan.execution[i].name;
-						if (name == action) {
-							get_action(execution_plan.execution[i+1].name);
-							break;
+				for (var i = 0; i < action_record.length; i++) {
+					let line_var = variables[action_record[i].name];
+					if ( isIntoView($(`#line${action_record[i].line}`)) == false ) {
+						slide(`#line${action_record[i].line}`);
+					}
+					if ($('#current').html() != '') {
+						let current = $('#current').html();
+						$(`#line${current}`).css({"background-color":"white"});
+					}
+
+					action_v = action_record[i].name;
+					current = action_record[i].line;
+					$(`#line${current}`).css({"background-color":"brown"});
+					$('#current').html(current);
+
+					// clear variables in case entering to function
+					var var_arr =  modules_variables[`${module_v}`];
+					if (line_var[0]["var"].func != undefined ) {
+						$(`.function_${line_var[0]["function"]}`).remove();
+						for (var j = var_arr.length-1;  j >= 0; j--) {
+							var el = var_arr[j];
+							if ((el.func == line_var[0]["var"].func) && (el.line == line_var[0]["line"])) {
+								var_arr.splice(j, 1);
+							}
+							
 						}
+						continue;
+					}
+
+					let k = '';
+					let v = '';
+					if (line_var[0]["var"]["return"] != undefined) {
+						k = "return";
+						v = line_var[0]["value"];
+					}
+					else {
+						k = line_var[0]["var"];
+						v = line_var[0]["value"];
+					}
+					console.log(`k ${k}`);
+					console.log(`v ${v}`);
+					
+					$('<div>', { class: `function_${line_var[0]["function"]} variable`, text: `${k}=${v}`}).appendTo(`#linecode${current}`);
+					
+					// store shown variables
+					modules_variables[`${module_v}`].push({func: `${line_var[0]["function"]}`, line: current, k: k, v: v})
+    			}
+			};
+			//get_action(action);
+			
+
+			function collect_actions(type) {
+				let actions_arr = [];
+				for (var i=0; i < execution_plan.execution.length; i++) {
+					console.log(execution_plan.execution[i]);
+					let name = execution_plan.execution[i].name;
+					if (name == action_v) {
+						let j = 1;
+						if (type == 'inclusive') {
+							j = 0;
+						}
+						let cond = true;
+						let line = undefined;
+						while (cond)
+						{
+							if ((i + j < execution_plan.execution.length) && (line == undefined))
+							{
+								line = execution_plan.execution[i+j].line;
+							}
+							if ((line == undefined) || (execution_plan.execution[i+j] == undefined) || (line != execution_plan.execution[i+j].line)) {
+								break;
+							}
+							actions_arr.push(execution_plan.execution[i+j]);
+							j = j + 1;
+						}
+						break;
 					}
 				}
-			);
-			$.get( `?get=pid_json&session_id=${session}&pid_id=${pid}`, function( data_execution ) {
-				//$( ".result" ).html( data );
-				console.log(data_execution);
-				execution_plan = data_execution;
+				return actions_arr;
+			}
 
-    
-			});
-		}
+			ClickNext = function() {
+					console.log(execution_plan);
+					let arr =collect_actions("next");
+					if (arr.length == 0) { return };
+					if (arr[0].module != module_v) { // in case of jumping to another module
+						var curr_func = arr[0]["function"];
+						var curr_line = arr[0]["line"];
+						$.get( `?get=module_lines&session_id=${session_v}&pid_id=${pid_v}&action_id=${action_v}&module=${arr[0].module}`,
+		 				function( data ) {
+							//$( ".result" ).html( data );
+							console.log(data);
+							module_v = arr[0].module;
+							$('#module_block')[0].outerHTML = data;
+							get_action(arr);
+							$('#next').click( ClickNext)
+							$('pre code').each(function(i, block) {
+							    hljs.highlightBlock(block);
+							});
+      
+							var vars = modules_variables[`${module_v}`];
+							for (var i = 0; i < vars.length; i++) {
+								if ((vars[i].func == curr_func) && (vars[i].line != curr_line)) {
+									let k = vars[i].k;
+									let v = vars[i].v;
+									let line = vars[i].line;
+									$('<div>', { class: `function_${vars[i].func} variable`, text: `${k}=${v}`}).appendTo(`#linecode${line}`);
+								}
+							}
+						});
+					}
+					else
+					{
+						get_action(arr);
+					}
+			};
+
+			$('#next').click( ClickNext);
 		//$('pre code').each(function(i, block) {
 		//    hljs.highlightBlock(block);
 		//});
+		}
     });
  
-    $( window ).on( "load", function() {
-        //console.log( "window loaded" );
-    });
+    //$( window ).on( "load", function() {
+    //    //console.log( "window loaded" );
+    //});
 </script>
 </head>
 <body>
@@ -290,39 +410,7 @@ Pid: {{ pid }} <br>
 
 
 
-
-{% if lines %}
-Session: {{ session }} <br>
-Pid: {{ pid }} <br>
-Module: {{ module }} <br>
-<button id="next">Next</button>
-<div id="action" style="display:none;">{{ action }}</div>
-<div id="session" style="display:none;">{{ session }}</div>
-<div id="module" style="display:none;">{{ module }}</div>
-<div id="pid" style="display:none;">{{ pid }}</div>
-<div id="current" style="display:none;"></div>
-<table cellspacing="0" style="border: 1px;">
-
-<th>Source</th>
-
-
-{% for v in lines %}
-<tr>
-<td width="5%">
-	<pre><code class="erlang">{{ v.line }}</code></pre>
-</td>
-<td width="1%" id="line{{ v.line }}">
-	&nbsp;
-</td>
-<td width="94%">
-	<pre><code class="erlang">{% if v.string == '' %}&nbsp; {% else %}{{ v.string }}{% endif %}</code></pre>
-</td>
-{% endfor %}
-
-</table>
-
-{% endif %}
-
+{% include "lines.dtl" %}
 
 
 

@@ -1,9 +1,7 @@
 -module(watcher).
 -behaviour(gen_server).
 
--export([start_link/1, start/0]).
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
-         code_change/3, raw_rule/1, rule/1, rule/2, clear/0, on/0, off/0, find_source_in_line/3, format/1, compiler_options/2, get_backend/0, settings/1]).
+-compile([export_all]).
 
 -include("../include/watcher.hrl").
 
@@ -11,6 +9,9 @@ start() -> watcher_sup:start_link().
 
 start_link(Args) ->
     gen_server:start_link({local,?MODULE}, ?MODULE, Args, []).
+
+stop() ->
+	gen_server:stop({local, ?MODULE}).
 	
 init(_Args) ->
 	process_flag(trap_exit, true),
@@ -25,7 +26,7 @@ get_session() ->
 	SessionN = maps:get(session, Settings, 1),
 	SessionN.
 
-update_session() ->
+new_session() ->
 	[{settings, Settings}] = ets:lookup(watcher_settings, settings),
 	SessionN = maps:get(session, Settings, 1),
 	NewSettings = Settings#{session := SessionN + 1},
@@ -71,6 +72,9 @@ find_source_in_line([H1|[H2|T]], Pos, LengthFull) ->
 find_source_in_line([H|T], _, _) ->
 		false.
 
+cut_wtch({func, _, _} = V) ->
+	V;
+				   
 cut_wtch({return, _, _} = V) ->
 	V;
 				   
@@ -112,14 +116,7 @@ on() ->
 off() ->
 	gen_server:call(?MODULE, {compile, original}, infinity).
 
-compile_file([F1, F2], Type) ->
-	[Beam, Erl] = 
-		case string:find(F1, ".beam", trailing) of
-			nomatch ->
-				[F2, F1];
-			_ ->
-				[F1, F2]
-		end,
+compile_file([Erl, Beam], Type) ->
 	ErlBackup = Erl ++ ".bak",
 	BeamBackup = Beam ++ ".bak",
 	{ok, ErlBinary} = file:read_file(Erl),
@@ -139,7 +136,7 @@ compile_file([F1, F2], Type) ->
 
 	Lines = string:split(ErlBinary, <<"\n">>, all),
 	FormattedLines = format_lines(Lines),
-	io:format("FormattedLines ~p~n", [FormattedLines]),
+	%io:format("FormattedLines ~p~n", [FormattedLines]),
 	ets:insert(watcher_sources, [{{get_session(), list_to_atom(ModuleName)}, FormattedLines}]),
 	%io:format("Compile Ebin dir ~p~n", [Outdir]),
 
@@ -193,7 +190,8 @@ format_lines_do([H|T], Line, Acc) ->
 %parse_rule(Rule) ->
 
 handle_call({settings, {Settings}}, _From, #{}=State) ->
-	ets:insert(watcher_settings, {settings, Settings}),
+	{settings, SettingsOld} = ets:lookup(watcher_settings, settings),
+	ets:insert(watcher_settings, {settings, maps:merge(SettingsOld,Settings)}),
 	{reply, ok, State};
 
 handle_call({options, {Module, Options}}, _From, #{}=State) ->
@@ -239,6 +237,7 @@ handle_call({rule, Modules}, _From, #{}=State) ->
 	{reply, ok, State};	
 
 handle_call({compile, Type}, _From, #{}=State) ->
+	io:format("compile ~p~n", [erlang:timestamp()]),
 	ListORules = ets:tab2list(watcher),
 	Modules = lists:usort(
 	[
@@ -253,16 +252,19 @@ handle_call({compile, Type}, _From, #{}=State) ->
 	]),
 	io:format("Modules ~p~n", [Modules]),
 
-	{ok,CWD} = file:get_cwd(),
 		
-	Files = lib_find:files(CWD, Modules, true),
+	io:format("find file [ ~p~n", [erlang:timestamp()]),
+	Files = lib_find:find(Modules),
+	io:format("find file ] ~p~n", [erlang:timestamp()]),
 	io:format("Files ~p~n", [Files]),
+	io:format("compile file [ ~p~n", [erlang:timestamp()]),
 
 	[
 		compile_file(File, Type)
 	||
 		File <- Files
 	],
+	io:format("compile file ] ~p~n", [erlang:timestamp()]),
 
 	io:format("Loading and purging modules ~n"),
 	Purge = [
@@ -289,6 +291,7 @@ handle_call({compile, Type}, _From, #{}=State) ->
 	],
 	io:format("~p~n", [Purge]),
 
+	io:format("end compile ~p~n", [erlang:timestamp()]),
 	{reply, ok, State};	
 
 handle_call(clear, _From, #{}=State) ->
@@ -316,6 +319,7 @@ handle_info({check, From, Name, MFA}, #{rules := Rules}=State) ->
     {noreply, State}.
 
 terminate(_Reason, _State) ->
+
     ok.
 
 code_change(_OldVsn, State, _Extra) ->

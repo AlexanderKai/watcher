@@ -1,7 +1,68 @@
 -module(lib_find).
--export([files/3, files/5]).
+-export([files/3, files/5, find/1]).
 -import(lists, [reverse/1]).
 -include_lib("kernel/include/file.hrl" ).
+
+find(Modules) ->
+	S = lists:flatten(lists:join(",", Modules)),
+	{ok, Cwd} = file:get_cwd(),
+	Res = lists:filtermap(fun (E) -> 
+	%io:fwrite("Path: ~s~n", [E]), 
+
+	Find = case length(E) < 2 of
+	true ->
+		Cwd;
+	_ ->
+		{Ch1, Tail1} = lists:split(1, E),
+		{Ch2, _Tail2} = lists:split(2, E),
+		if 
+			Ch2 == ".." ->
+				Cwd;
+			Ch2 == "./" ->
+				Cwd ++ Tail1;
+			Ch1 =/= "/" ->
+				Cwd ++ "/" ++ E;
+			true ->
+				E
+		end
+	end,
+	%io:fwrite("~p~n", [Find ++ "/{test_w,test_t}.{erl,beam}"]),
+	F = filelib:wildcard(Find ++ "/{"++ S ++"}.{erl,beam}"), 
+	%io:format("~p~n", [Find]), 
+	io:format("~p~n", [F]), 
+	FinF = lists:map(fun (E) -> list_to_binary(E) end, F),
+	case F of [] -> false; _ -> {true, FinF} end end, code:get_path()),
+	LF = lists:flatten(Res),
+	io:format("LF ~n~p~n", [LF]),	
+	FinRes = lists:usort(lists:filtermap(fun(E) ->
+	case E of undefined -> false; _ -> {true, E} end end,
+	[
+	begin
+		Sp1 = binary:split(L1, [<<"/">>, <<".">>], [global]),
+		Sp2 = binary:split(L2, [<<"/">>, <<".">>], [global]),
+		S1 = lists:nth(length(Sp1)-1, Sp1),
+		S2 = lists:nth(length(Sp2)-1, Sp2),
+		S1T = lists:nth(length(Sp1), Sp1),
+		S2T = lists:nth(length(Sp2), Sp2),
+		io:format("1 ~p~n", [Sp1]),
+		io:format("2 ~p~n", [Sp2]),
+		io:format("1 ~p~n", [S1]),
+		io:format("2 ~p~n", [S2]),
+		io:format("1 ~p~n", [S1T]),
+		io:format("2 ~p~n", [S2T]),
+		if 
+			(S1 == S2 andalso (S1T == <<"erl">>) andalso (S2T == <<"beam">>)) == true ->
+				[L1, L2];
+			(S1 == S2 andalso (S2T == <<"erl">>) andalso (S1T == <<"beam">>)) == true ->
+				[L2, L1];
+			true ->
+				undefined
+		end
+	end
+	||
+	L1 <- LF, L2 <- LF
+	])),
+	FinRes.
 
 files(Dir, Re, Flag) ->
 	%io:format("begin ~n", []),

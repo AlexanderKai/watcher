@@ -21,10 +21,16 @@ make_record(X) ->
 	V= io_lib:format("~p",[X#watcher_history.value]),
 	Value = list_to_binary(lists:flatten(V)),
 	Var = case X#watcher_history.var of
+		{func, M, F} -> 
+			MM = atom_to_binary(M, latin1),
+			FF = atom_to_binary(F, latin1),
+			%<<"return of ", MM/binary, ":", FF/binary>>;
+			[{func, [{module, MM}, {function, FF}]}];
 		{return, M, F} -> 
 			MM = atom_to_binary(M, latin1),
 			FF = atom_to_binary(F, latin1),
-			<<"return of ", MM/binary, ":", FF/binary>>;
+			%<<"return of ", MM/binary, ":", FF/binary>>;
+			[{return, [{module, MM}, {function, FF}]}];
 		Rest ->
 			Rest
 	end,
@@ -48,52 +54,56 @@ to_map([], Acc) ->
 	Acc;
 
 to_map([H|T],Acc) ->
-	Line = integer_to_binary(maps:get(line, H)),
-	Value = maps:get(Line, Acc, []),
-	NewAcc = maps:put(Line, Value ++ [H] ,Acc),
+	Name = maps:get(name, H),
+	Value = maps:get(Name, Acc, []),
+	NewAcc = maps:put(Name, Value ++ [H] ,Acc),
 	to_map(T, NewAcc).
 
 get_handler(<<"GET">>, <<"action">>, Req) ->
-	{Action_Id_, Req2} = cowboy_req:qs_val(<<"action_id">>, Req),
-	{Pid_Id_, Req3} = cowboy_req:qs_val(<<"pid_id">>, Req2),
-	{Session_Id_, Req4} = cowboy_req:qs_val(<<"session_id">>, Req3),
+	%{Action_Id_From_, Req2} = cowboy_req:qs_val(<<"action_id_from">>, Req),
+	%{Action_Id_To_, Req2} = cowboy_req:qs_val(<<"action_id_to">>, Req),
+	{Pid_Id_, Req2} = cowboy_req:qs_val(<<"pid_id">>, Req),
+	{Session_Id_, Req3} = cowboy_req:qs_val(<<"session_id">>, Req2),
+	%{Module, Req4} = cowboy_req:qs_val(<<"module">>, Req3),
 	io:format("Session_ ~p~n", [Session_Id_]),
 	io:format("Pid_Id ~p~n", [Pid_Id_]),
-	Action_Id = binary_to_integer(Action_Id_),
+	%Action_Id_From = binary_to_integer(Action_Id_From_),
+	%Action_Id_To = binary_to_integer(Action_Id_To_),
 	Session_Id = binary_to_integer(Session_Id_),
 	Pid_Id = list_to_pid(binary_to_list(Pid_Id_)),
+	%Module = list_to_atom(binary_to_list(Pid_Id_)),
 	io:format("Session_ ~p~n", [Session_Id]),
 	io:format("Pid_Id ~p~n", [Pid_Id]),
 
-	Modules = do(qlc:q([ X#watcher_history.module || X <- mnesia:table(watcher_history), X#watcher_history.name == Action_Id], [{unique, true}])),
-	[Module] = Modules,
-	[ModuleSources] = [
-		begin
-			%io:format("M ~p~n", [M]),
-			[{{Session_Id, M}, ModuleLines}] = ets:lookup(watcher_sources, {Session_Id, M}),
-			%io:format("ModuleLines ~p~n", [ModuleLines]),
-			ModuleLines
-		end
-	||
-	M <- Modules
-	],
+	%Modules = do(qlc:q([ X#watcher_history.module || X <- mnesia:table(watcher_history), X#watcher_history.name == Action_Id], [{unique, true}])),
+	%[Module] = Modules,
+	%[ModuleSources] = [
+	%	begin
+	%		%io:format("M ~p~n", [M]),
+	%		[{{Session_Id, M}, ModuleLines}] = ets:lookup(watcher_sources, {Session_Id, M}),
+	%		%io:format("ModuleLines ~p~n", [ModuleLines]),
+	%		ModuleLines
+	%	end
+	%||
+	%M <- Modules
+	%],
 	%io:format("Module Sources ~p~n", [ModuleSources]),
 
-	Records = do(qlc:q([ make_record(X) || X <- mnesia:table(watcher_history), X#watcher_history.session == Session_Id, X#watcher_history.pid == Pid_Id, X#watcher_history.module == Module ])),
+	Records = do(qlc:q([ make_record(X) || X <- mnesia:table(watcher_history), X#watcher_history.session == Session_Id, X#watcher_history.pid == Pid_Id])),
 	%io:format("records ~p~n", [Records]),
 
-	[ActionLine] = do(qlc:q([ X#watcher_history.line || X <- mnesia:table(watcher_history), X#watcher_history.name == Action_Id])),
+	%[ActionLine] = do(qlc:q([ X#watcher_history.line || X <- mnesia:table(watcher_history), X#watcher_history.name == Action_Id])),
 
-	Query = do(qlc:info(qlc:q([ X#watcher_history.name || X <- mnesia:table(watcher_history), X#watcher_history.name > Action_Id], [{max_lookup, 1}]), [{n_elements, 1}])),
+	%Query = do(qlc:info(qlc:q([ X#watcher_history.name || X <- mnesia:table(watcher_history), X#watcher_history.name > Action_Id], [{max_lookup, 1}]), [{n_elements, 1}])),
 	%Query2 = qlc:info(Query, [{n_elements, 1}]),	
-	NextActionLine = Query,
-	io:format("NextActionLine ~p~n", [NextActionLine]),
+	%NextActionLine = Query,
+	%io:format("NextActionLine ~p~n", [NextActionLine]),
 	%Sorting = fun(#{name:=A}, #{name:=B}) ->
 	%	A =< B
 	%end,i
 
-	RecordsMap = to_map(Records),
-	%io:format("~n~nRecordMap~n~n~p~n", [RecordsMap]),
+	%RecordsMap = to_map(Records),
+	io:format("~n~nRecordMap~n~n~p~n", [to_map(Records)]),
 
 	%Lines = [
 	%S#{vars => 
@@ -109,8 +119,31 @@ get_handler(<<"GET">>, <<"action">>, Req) ->
 	cowboy_req:reply(
 		200, 
 		[{<<"content-type">>, <<"application/json; charset=utf-8">>}],
-		jsone:encode([{records, RecordsMap}, {line, ActionLine}]),
-		Req4);
+		jsone:encode([{lines, to_map(Records)}]),
+		Req3);
+
+get_handler(<<"GET">>, <<"module_lines">>, Req) ->
+	{Module_, Req2} = cowboy_req:qs_val(<<"module">>, Req),
+	{Session_Id_, Req3} = cowboy_req:qs_val(<<"session_id">>, Req2),
+	{Pid_Id_, Req4} = cowboy_req:qs_val(<<"pid_id">>, Req3),
+	{Action_Id_, Req5} = cowboy_req:qs_val(<<"action_id">>, Req4),
+	Session_Id = binary_to_integer(Session_Id_),
+	Module = binary_to_atom(Module_, latin1),
+	Action_Id = binary_to_integer(Action_Id_),
+	Pid_Id = list_to_pid(binary_to_list(Pid_Id_)),
+	io:format("Session_ ~p~n", [Session_Id]),
+	io:format("Module ~p~n", [Module]),
+
+	[{{Session_Id, Module}, ModuleLines}] = ets:lookup(watcher_sources, {Session_Id, Module}),
+
+	Vars = [{session, Session_Id_}, {pid, Pid_Id_}, {module, atom_to_binary(Module, latin1)}, {action, Action_Id}, {lines, ModuleLines}],
+	{ok, Render} = lines_dtl:render(Vars),
+
+	cowboy_req:reply(
+		200, 
+		[{<<"content-type">>, <<"text/html; charset=utf-8">>}],
+		Render,
+		Req5);
 
 get_handler(<<"GET">>, <<"module">>, Req) ->
 	{Action_Id_, Req2} = cowboy_req:qs_val(<<"action_id">>, Req),
@@ -164,7 +197,7 @@ get_handler(<<"GET">>, <<"pid_json">>, Req) ->
 	Pid_Id = list_to_pid(binary_to_list(Pid_Id_)),
 	io:format("Session_ ~p~n", [Session_Id]),
 	io:format("Pid_Id ~p~n", [Pid_Id]),
-	Records = do(qlc:q([ maps:with([name, module, function, line, same],make_record(X)) || X <- mnesia:table(watcher_history), X#watcher_history.session == Session_Id, X#watcher_history.pid == Pid_Id], [{unique, true}])),
+	Records = do(qlc:q([ make_record(X) || X <- mnesia:table(watcher_history), X#watcher_history.session == Session_Id, X#watcher_history.pid == Pid_Id], [{unique, true}])),
 	io:format("records ~p~n", [Records]),
 	
 	cowboy_req:reply(
@@ -196,7 +229,7 @@ get_handler(<<"GET">>, <<"pid">>, Req) ->
 	io:format("records ~p~n", [Records]),
 	
 	Sorting = fun(#{name:=A}, #{name:=B}) ->
-		A =< B
+		A >= B
 	end,
 
 	Vars = [{session, Session_Id_}, {pid, Pid_Id_}, {raws, lists:sort(Sorting, Records)}],

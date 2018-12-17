@@ -45,7 +45,7 @@ get_filter(Module, Function) ->
 
 get_filter(Module, Function, Variable) ->
 	Res = ets:lookup(watcher, {Module, Function}),
-	io:format("get_filter/3 Res ~p~nModule ~p~nFunction ~p~nVariable ~p~n",[Res, Module, Function, Variable]),
+	%io:format("get_filter/3 Res ~p~nModule ~p~nFunction ~p~nVariable ~p~n",[Res, Module, Function, Variable]),
 	case lists:keymember('ALL', 2, Res) of
 		false ->
 			lists:keymember(Variable, 2, Res);
@@ -103,6 +103,8 @@ find_module([_H|T]) ->
 parse_func_clauses({P,M,F}, {clause,Line,Arguments,GuardSeq,Expressions}) ->
 	FuncPattern0 = Arguments,
 	io:format("parse_func_clauses Arguments~p~n", [Arguments]),
+	FunctionDefinition = [io_format({M, F}, {func, M, F}, Line)],
+	%io:format("FunctionDefinition ~p~n", [FunctionDefinition]),
 	FunctionMatching = lists:flatten(
 		lists:map(
 		fun(V) ->
@@ -121,7 +123,7 @@ parse_func_clauses({P,M,F}, {clause,Line,Arguments,GuardSeq,Expressions}) ->
 	LastExpression = [parse_expressions_tail({P,M,F}, Tail)],
 	%io:format("parse_func_expressions Result ~p~n", [FunctionMatching]),
 	%FuncPattern = find_var(parse_expressions(MF, Arguments)),
-	{clause, Line, Arguments, GuardSeq, FunctionMatching ++ NewExpressions ++ LastExpression}.
+	{clause, Line, Arguments, GuardSeq, FunctionDefinition ++ FunctionMatching ++ NewExpressions ++ LastExpression}.
 
 parse_clauses({P,M,F}, {clause,Line,Arguments,GuardSeq,Expressions}) ->
 	%io:format("ClausePattern ~p~n", [Expressions]),
@@ -263,7 +265,7 @@ var_watcher(V) ->
 	V.
 
 find_var({map, _Line, Map}) ->
-	io:format("find_var map~n"),
+	%io:format("find_var map~n"),
 	lists:map(
 		fun(V) -> 
 			find_var(V) 
@@ -271,7 +273,7 @@ find_var({map, _Line, Map}) ->
 	Map);
 
 find_var({map_field_exact, _Line, Key, Var}) ->
-	io:format("find_var map_field_exact~n"),
+	%io:format("find_var map_field_exact~n"),
 	find_var(Var);
 
 find_var(List) when is_list(List) ->
@@ -400,12 +402,12 @@ parse_expressions({Perm, Module, Function}, {match, Line, Var, Expression}, Orde
 			io:format("E1 ~p~nE2 ~p~nStack ~p~n", [E1, E2, erlang:get_stacktrace()]),
 		A = 1/0
 	end,
-	io:format("Line ~p~nVar_Watcher ~p~n", [Line, Var_Watcher]),
+	%io:format("Line ~p~nVar_Watcher ~p~n", [Line, Var_Watcher]),
 	{MiddleVar, VarWatcherSafe} = var_watcher_safe(Var),
-	io:format("Var_Watcher_safe ~p~n", [VarWatcherSafe]),
+	%io:format("Var_Watcher_safe ~p~n", [VarWatcherSafe]),
 	ListVarsWatcherSafe = lists:flatten(find_var(VarWatcherSafe)),
 	%ListVarsWatcher = lists:flatten(Var_Watcher),
-	io:format("Vars ~p~n", [ListVarsWatcherSafe]),
+	%io:format("Vars ~p~n", [ListVarsWatcherSafe]),
 
 	Same = generate(),
 	Tracing = {block, Line,[
@@ -420,10 +422,10 @@ parse_expressions({Perm, Module, Function}, {match, Line, Var, Expression}, Orde
 	%case Line > 90 andalso Line < 105 of
 	%	true -> 
 	%io:format("Vars ~p~n", [Vars]),
-	io:format("Tracing ~p~n", [Tracing]),
+	%io:format("Tracing ~p~n", [Tracing]),
 	%io:format("VarWatcher ~p~n", [Var_Watcher]),
 	%io:format("ListVarWatcher ~p~n", [ListVarsWatcherSafe]),
-	io:format("------------------------------------~n"),
+	%io:format("------------------------------------~n"),
 	%	_ ->
 	%		[]
 	%end,
@@ -475,16 +477,16 @@ parse_expressions({P,M,F}, {'catch', Line, Exp}, Order) ->
 	{'catch', Line, NewExp};
 
 parse_expressions({P,M,F}, {'try', Line, Tries, Cases, Catch, After}, Order) ->
-	io:format("parse try~n"),
+	%io:format("parse try~n"),
 	NewTries = lists:map(
 		fun(V) -> 
-			io:format("parse try clause ~n~p~n", [V]),
+			%io:format("parse try clause ~n~p~n", [V]),
 			parse_expressions({P,M,F}, V) 
 		end, 
 	Tries),
 	NewCatch = lists:map(
 		fun(V) -> 
-			io:format("parse try catch ~n~p~n", [V]),
+			%io:format("parse try catch ~n~p~n", [V]),
 			parse_clauses({P,M,F}, V) 
 		end, 
 	Catch),
@@ -519,6 +521,8 @@ io_format({Module, Function}, Var, Line, Same) ->
 				{tuple, Line,[{atom, Line, Module}, {atom, Line, Function}]},
 				{integer, Line, Line},
 			 	case Var of
+					{func, M, F} ->
+						{tuple, Line, [{atom, Line, func}, {atom, Line, M}, {atom, Line, F}]};
 					{return, M, F} ->
 						{tuple, Line, [{atom, Line, return}, {atom, Line, M}, {atom, Line, F}]};
 					_ ->
@@ -561,6 +565,9 @@ gen_list_do([H|T], Acc, Line) ->
 %	NameRecord = element(1, R),
 %	lists:zip(record_info(fields,NameRecord),tl(tuple_to_list(R)));
 
+
+format_var({func, _, _}, Line) ->
+	{string, Line, ""};
 
 format_var('_', Line) ->
 	{string, Line, "_"};
