@@ -19,6 +19,15 @@ handle(Req, State) ->
 
 make_record(X) ->
 	V= io_lib:format("~p",[X#watcher_history.value]),
+	ShortValue = binary:replace(
+	case byte_size(iolist_to_binary(V)) > 40 of
+		true ->
+			Short = binary:part(iolist_to_binary(V), 0, 40),
+			<<Short/binary, "...">>;
+		_ ->
+			iolist_to_binary(V)
+	end, 
+	<<"\n">>, <<"">>, [global]),
 	Value = list_to_binary(lists:flatten(V)),
 	Var = case X#watcher_history.var of
 		{func, M, F} -> 
@@ -44,6 +53,7 @@ make_record(X) ->
 		same => X#watcher_history.same,
 		time => X#watcher_history.time,
 		var => Var,
+		short_value => ShortValue,
 		value => Value
 	}.
 
@@ -247,7 +257,13 @@ get_handler(<<"GET">>, <<"session">>, Req) ->
 	{Id_, Req2} = cowboy_req:qs_val(<<"id">>, Req),
 	Id = binary_to_integer(Id_),
 	io:format("Id ~p~n", [Id]),
-	Pids = do(qlc:q([#{pid => list_to_binary(pid_to_list(X#watcher_history.pid))} || X <- mnesia:table(watcher_history), X#watcher_history.session == Id])),
+	Pids = do(qlc:q([
+		begin
+			[{{Id, Pid}, ProcessInfo}] = ets:lookup(watcher_pids, {Id, X#watcher_history.pid}),
+			InitialCall = proplists:get_value(initial_call, ProcessInfo),
+			#{pid => list_to_binary(pid_to_list(X#watcher_history.pid)), initial_call=> erlang:iolist_to_binary(io_lib:write(InitialCall))}
+		end
+	|| X <- mnesia:table(watcher_history), X#watcher_history.session == Id])),
 	io:format("pids ~p~n", [Pids]),
 
 	Vars = [{session, Id}, {pids, lists:usort(Pids)}],

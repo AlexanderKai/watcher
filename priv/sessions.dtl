@@ -35,11 +35,25 @@ td {
 }
 
 .variable {
-	display:inline-block;
+	display:inline-table;
 	color: #5cd2e6;
 	margin-left: 10px;
 }
 
+.variable_float {
+	display:block;
+	position:absolute;
+	background-color:#666;
+	color: #5cd2e6;
+	z-index:100;
+	width:500px;
+	height:350px;
+	overflow-y:auto;
+	overflow-wrap:break-word;
+	border-color:#600;
+	border-width:1px;
+	border-style:solid;
+}
 /*background color*/
 .hljs {
   display: block;
@@ -147,7 +161,16 @@ td {
 <script>
 
 	var variables = {};
-	
+
+	function makeid() {
+		var text = "";
+		var possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+		for (var i = 0; i < 5; i++)
+			text += possible.charAt(Math.floor(Math.random() * possible.length));
+		return text;
+	}
+
 	function unEntity(str){
 		return str.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
 	}
@@ -239,18 +262,24 @@ td {
 
 					let k = '';
 					let v = '';
+					if (line_var[0]["value"] == line_var[0]["short_value"]) {
+						v = line_var[0]["value"];
+					} 
+					else {
+						v = line_var[0]["short_value"];
+					}
 					if (line_var[0]["var"]["return"] != undefined) {
 						k = "return";
-						v = line_var[0]["value"];
 					}
 					else {
 						k = line_var[0]["var"];
-						v = line_var[0]["value"];
 					}
 					console.log(`k ${k}`);
 					console.log(`v ${v}`);
 					
-					$('<div>', { class: `function_${line_var[0]["function"]} variable`, text: `${k}=${v}`}).appendTo(`#linecode${current}`);
+					let rand_id = makeid();	
+					$('<div>', { id: rand_id, class: `function_${line_var[0]["function"]} variable`, text: `${k}=${v}`}).appendTo(`#linecode${current}`);
+					$(`#${rand_id}`).click({id: rand_id, full_value: line_var[0]["value"]}, ClickVariable);
 					
 					// store shown variables
 					modules_variables[`${module_v}`].push({func: `${line_var[0]["function"]}`, line: current, k: k, v: v})
@@ -288,6 +317,25 @@ td {
 				}
 				return actions_arr;
 			}
+
+			ClickVariable = function(event) {
+				let rand_id = makeid();	
+				let id = event.data.id;
+				let full_value = event.data.full_value;
+				let position = $(`#${id}`).offset();
+				$('<div>', { id: rand_id, class: 'variable_float', text: `${full_value}`}).appendTo('body');
+				$(`#${rand_id}`).offset(position);
+				$(`#${rand_id}`).mouseleave({id: `#${rand_id}`}, MouseLeave);
+				$(`#${rand_id}`).each(function(i, block) {
+				    hljs.highlightBlock(block);
+				});
+			}
+
+			MouseLeave = function(event) {
+				let id = event.data.id;
+				$(id).remove();
+			}
+
 
 			ClickNext = function() {
 					console.log(execution_plan);
@@ -367,6 +415,9 @@ Session: {{ session }} <br>
 <tr>
 <td>
 	<a href="?get=pid&session_id={{ session }}&pid_id={{ v.pid }}" >{{ v.pid }}</a>
+</td>
+<td>
+	{{ v.initial_call }}
 </td>
 </tr>
 {% endfor %}

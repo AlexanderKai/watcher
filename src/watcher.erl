@@ -107,7 +107,18 @@ format([console, MF, Line, Variable, Value]) ->
 format([mnesia, {M, F}, Line, Variable, Value, Same]) ->
 	Var = cut_wtch(Variable),
 	Session = get_session(),
-	Res = mnesia:transaction(fun() -> mnesia:write(#watcher_history{name = erlang:unique_integer([monotonic]), session = Session, pid = self(), module = M, function = F, line = Line, time = erlang:monotonic_time(), var = Var, value = Value, same = list_to_binary(Same)}) end),
+	Pid = self(),
+	Res = mnesia:transaction(
+	fun() -> 
+		%IsPidExist = do(qlc:q([ Pid || X <- mnesia:table(watcher_history), X#watcher_history.session == Session, X#watcher_history.pid == Pid], [{unique, true}])),
+		IsPidExist = ets:lookup(watcher_pids, {Session, Pid}),
+		case IsPidExist of
+			[] ->
+				ets:insert(watcher_pids, {{Session, Pid}, process_info(Pid)});
+			_ -> nothing
+		end,
+		mnesia:write(#watcher_history{name = erlang:unique_integer([monotonic]), session = Session, pid = Pid, module = M, function = F, line = Line, time = erlang:monotonic_time(), var = Var, value = Value, same = list_to_binary(Same)}) 
+	end),
 	io:format("Res format mnesia ~p~n", [Res]).
 
 on() ->
@@ -116,7 +127,9 @@ on() ->
 off() ->
 	gen_server:call(?MODULE, {compile, original}, infinity).
 
-compile_file([Erl, Beam], Type) ->
+compile_file([Erl_, Beam_], Type) ->
+	Erl = binary_to_list(Erl_),
+	Beam = binary_to_list(Beam_),
 	ErlBackup = Erl ++ ".bak",
 	BeamBackup = Beam ++ ".bak",
 	{ok, ErlBinary} = file:read_file(Erl),
@@ -313,6 +326,7 @@ handle_info(init, #{rules := Rules}=State) ->
 	ets:new(watcher, [named_table, {read_concurrency, true}, bag, public]),
 	ets:new(watcher_module_options, [named_table, {read_concurrency, true}, set, public]),
 	ets:new(watcher_sources, [named_table, {read_concurrency, true}, set, public]),
+	ets:new(watcher_pids, [named_table, {read_concurrency, true}, set, public]),
     {noreply, State};
 
 handle_info({check, From, Name, MFA}, #{rules := Rules}=State) ->

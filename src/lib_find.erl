@@ -44,12 +44,12 @@ find(Modules) ->
 		S2 = lists:nth(length(Sp2)-1, Sp2),
 		S1T = lists:nth(length(Sp1), Sp1),
 		S2T = lists:nth(length(Sp2), Sp2),
-		io:format("1 ~p~n", [Sp1]),
-		io:format("2 ~p~n", [Sp2]),
-		io:format("1 ~p~n", [S1]),
-		io:format("2 ~p~n", [S2]),
-		io:format("1 ~p~n", [S1T]),
-		io:format("2 ~p~n", [S2T]),
+		%io:format("1 ~p~n", [Sp1]),
+		%io:format("2 ~p~n", [Sp2]),
+		%io:format("1 ~p~n", [S1]),
+		%io:format("2 ~p~n", [S2]),
+		%io:format("1 ~p~n", [S1T]),
+		%io:format("2 ~p~n", [S2T]),
 		if 
 			(S1 == S2 andalso (S1T == <<"erl">>) andalso (S2T == <<"beam">>)) == true ->
 				[L1, L2];
