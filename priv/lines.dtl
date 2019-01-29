@@ -1,0 +1,44 @@
+{% if lines %}
+<div id="module_block">
+
+<div>
+	Session: {{ session }} <br>
+	Pid: {{ pid }} <br>
+	Module: {{ module }} <br>
+	<button>Next</button>
+</div>
+<div class="navigator">
+	Session: {{ session }} <br>
+	Pid: {{ pid }} <br>
+	Module: {{ module }} <br>
+	<button id="next">Next</button>
+</div>
+<div id="action" style="display:none;">{{ action }}</div>
+<div id="session" style="display:none;">{{ session }}</div>
+<div id="module" style="display:none;">{{ module }}</div>
+<div id="pid" style="display:none;">{{ pid }}</div>
+<div id="current" style="display:none;"></div>
+<div class="listing">
+<table cellspacing="0" style="border: 0px;">
+
+<th>Source</th>
+
+
+{% for v in lines %}
+<tr>
+<td width="5%">
+	<pre><code class="erlang">{{ v.line }}</code></pre>
+</td>
+<td width="1%" id="line{{ v.line }}">
+	&nbsp;
+</td>
+<td width="94%">
+	<pre><code id="linecode{{ v.line }}" class="erlang">{% if v.string == '' %}&nbsp; {% else %}{{ v.string }}{% endif %}</code></pre>
+</td>
+{% endfor %}
+
+</table>
+</div>
+
+</div>
+{% endif %}
